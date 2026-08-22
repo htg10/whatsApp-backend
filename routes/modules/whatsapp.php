@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\WhatsApp\Controllers\InboxController;
 use App\Modules\WhatsApp\Controllers\WhatsAppAccountController;
 use Illuminate\Support\Facades\Route;
 
@@ -21,4 +22,10 @@ Route::prefix('whatsapp')->group(function () {
     Route::post('/numbers/{number}/register', [WhatsAppAccountController::class, 'register']);
     Route::post('/numbers/{number}/send-test', [WhatsAppAccountController::class, 'sendTest']);
     Route::delete('/numbers/{number}', [WhatsAppAccountController::class, 'destroy']);
+
+    // Inbox
+    Route::get('/conversations', [InboxController::class, 'conversations']);
+    Route::get('/conversations/{conversation}/messages', [InboxController::class, 'messages']);
+    Route::post('/conversations/{conversation}/mark-read', [InboxController::class, 'markRead']);
+    Route::post('/conversations/{conversation}/send', [InboxController::class, 'send']);
 });

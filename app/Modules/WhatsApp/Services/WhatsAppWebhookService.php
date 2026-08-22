@@ -1,0 +1,229 @@
+<?php
+
+namespace App\Modules\WhatsApp\Services;
+
+use App\Models\Contact;
+use App\Models\Conversation;
+use App\Models\Message;
+use App\Models\MessageAttachment;
+use App\Models\MessageStatus;
+use App\Models\WebhookEvent;
+use App\Models\WebhookLog;
+use App\Models\WhatsappPhoneNumber;
+use App\Support\Services\BaseService;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+
+class WhatsAppWebhookService extends BaseService
+{
+    public function handleInboundMessage(WebhookEvent $event): void
+    {
+        $payload = $event->payload;
+        $phoneNumberId = $payload['metadata']['phone_number_id'] ?? null;
+        $msg = $payload['message'] ?? [];
+        $contactInfo = $payload['contacts'][0] ?? [];
+
+        $phone = WhatsappPhoneNumber::where('phone_number_id', $phoneNumberId)->first();
+
+        if (! $phone) {
+            $this->log($event, 'warning', 'message.orphaned', 'Phone number not found in system', [
+                'phone_number_id' => $phoneNumberId,
+            ]);
+            return;
+        }
+
+        $tenantId = $phone->tenant_id;
+        $event->update(['tenant_id' => $tenantId]);
+
+        $waId = $contactInfo['wa_id'] ?? ($msg['from'] ?? null);
+        if (! $waId) {
+            $this->log($event, 'warning', 'message.no_sender', 'No wa_id in webhook payload');
+            return;
+        }
+
+        $profileName = $contactInfo['profile']['name'] ?? null;
+
+        $contact = Contact::withoutGlobalScopes()->firstOrCreate(
+            ['tenant_id' => $tenantId, 'wa_id' => $waId],
+            [
+                'phone' => '+' . $waId,
+                'name' => $profileName,
+                'source' => 'inbound',
+            ]
+        );
+
+        if ($profileName && ! $contact->name) {
+            $contact->update(['name' => $profileName]);
+        }
+        $contact->update(['last_interaction_at' => now()]);
+
+        $conversation = Conversation::withoutGlobalScopes()->firstOrCreate(
+            [
+                'contact_id' => $contact->id,
+                'whatsapp_phone_number_id' => $phone->id,
+            ],
+            [
+                'tenant_id' => $tenantId,
+                'status' => 'open',
+                'unread_count' => 0,
+                'is_bot_active' => false,
+            ]
+        );
+
+        $conversation->update([
+            'window_expires_at' => now()->addHours(24),
+            'status' => $conversation->status === 'closed' ? 'open' : $conversation->status,
+        ]);
+
+        $msgType = $msg['type'] ?? 'text';
+        $body = $this->extractBody($msg, $msgType);
+        $wamid = $msg['id'] ?? null;
+
+        $existing = $wamid
+            ? Message::withoutGlobalScopes()->where('external_message_id', $wamid)->first()
+            : null;
+
+        if ($existing) {
+            $this->log($event, 'info', 'message.duplicate', "Duplicate wamid: {$wamid}");
+            return;
+        }
+
+        $message = Message::withoutGlobalScopes()->create([
+            'tenant_id' => $tenantId,
+            'conversation_id' => $conversation->id,
+            'contact_id' => $contact->id,
+            'whatsapp_phone_number_id' => $phone->id,
+            'direction' => Message::DIRECTION_INBOUND,
+            'type' => $msgType,
+            'body' => $body,
+            'external_message_id' => $wamid,
+            'reply_to_external_id' => $msg['context']['id'] ?? null,
+            'status' => 'received',
+            'payload' => $msg,
+        ]);
+
+        if (in_array($msgType, ['image', 'video', 'audio', 'document', 'sticker'])) {
+            $mediaData = $msg[$msgType] ?? [];
+            MessageAttachment::create([
+                'tenant_id' => $tenantId,
+                'message_id' => $message->id,
+                'type' => $msgType,
+                'mime_type' => $mediaData['mime_type'] ?? null,
+                'meta_media_id' => $mediaData['id'] ?? null,
+                'caption' => $mediaData['caption'] ?? null,
+                'file_name' => $mediaData['filename'] ?? null,
+            ]);
+        }
+
+        $conversation->update([
+            'last_message_at' => now(),
+            'last_message_preview' => Str::limit($body ?? "[$msgType]", 100),
+            'unread_count' => $conversation->unread_count + 1,
+        ]);
+
+        $this->log($event, 'info', 'message.received', "Inbound {$msgType} from {$waId}", [
+            'message_id' => $message->id,
+            'conversation_id' => $conversation->id,
+        ]);
+    }
+
+    public function handleStatusUpdate(WebhookEvent $event): void
+    {
+        $payload = $event->payload;
+        $statusData = $payload['status'] ?? [];
+
+        $wamid = $statusData['id'] ?? null;
+        $statusName = $statusData['status'] ?? null;
+        $timestamp = isset($statusData['timestamp'])
+            ? \Carbon\Carbon::createFromTimestamp($statusData['timestamp'])
+            : now();
+
+        if (! $wamid || ! $statusName) {
+            $this->log($event, 'warning', 'status.incomplete', 'Missing wamid or status name');
+            return;
+        }
+
+        $message = Message::withoutGlobalScopes()
+            ->where('external_message_id', $wamid)
+            ->first();
+
+        if (! $message) {
+            $this->log($event, 'info', 'status.no_message', "No message found for wamid: {$wamid}");
+            return;
+        }
+
+        $event->update(['tenant_id' => $message->tenant_id]);
+
+        $existingStatus = MessageStatus::withoutGlobalScopes()
+            ->where('message_id', $message->id)
+            ->where('status', $statusName)
+            ->exists();
+
+        if (! $existingStatus) {
+            MessageStatus::withoutGlobalScopes()->create([
+                'tenant_id' => $message->tenant_id,
+                'message_id' => $message->id,
+                'status' => $statusName,
+                'occurred_at' => $timestamp,
+                'conversation_id_meta' => $statusData['conversation']['id'] ?? null,
+                'pricing_category' => $statusData['pricing']['category'] ?? null,
+                'pricing_model' => $statusData['pricing']['pricing_model'] ?? null,
+                'billable' => $statusData['pricing']['billable'] ?? false,
+                'error_code' => $statusData['errors'][0]['code'] ?? null,
+                'error_message' => $statusData['errors'][0]['title'] ?? null,
+            ]);
+        }
+
+        $statusOrder = ['queued' => 1, 'sent' => 2, 'delivered' => 3, 'read' => 4, 'failed' => 0];
+        $currentOrder = $statusOrder[$message->status] ?? 0;
+        $newOrder = $statusOrder[$statusName] ?? 0;
+
+        if ($newOrder > $currentOrder || $statusName === 'failed') {
+            $updates = ['status' => $statusName];
+
+            match ($statusName) {
+                'sent' => $updates['sent_at'] = $timestamp,
+                'delivered' => $updates['delivered_at'] = $timestamp,
+                'read' => $updates['read_at'] = $timestamp,
+                'failed' => $updates = array_merge($updates, [
+                    'failed_at' => $timestamp,
+                    'error_code' => $statusData['errors'][0]['code'] ?? null,
+                    'error_message' => $statusData['errors'][0]['title'] ?? null,
+                ]),
+                default => null,
+            };
+
+            $message->update($updates);
+        }
+
+        $this->log($event, 'info', 'status.updated', "Status {$statusName} for wamid: {$wamid}");
+    }
+
+    private function extractBody(array $msg, string $type): ?string
+    {
+        return match ($type) {
+            'text' => $msg['text']['body'] ?? null,
+            'image', 'video', 'document', 'sticker' => $msg[$type]['caption'] ?? null,
+            'location' => sprintf('Location: %s, %s', $msg['location']['latitude'] ?? '', $msg['location']['longitude'] ?? ''),
+            'contacts' => 'Contact card',
+            'reaction' => $msg['reaction']['emoji'] ?? null,
+            'button' => $msg['button']['text'] ?? null,
+            'interactive' => $msg['interactive']['button_reply']['title']
+                ?? $msg['interactive']['list_reply']['title']
+                ?? null,
+            default => null,
+        };
+    }
+
+    private function log(WebhookEvent $event, string $level, string $action, string $message, array $context = []): void
+    {
+        WebhookLog::create([
+            'tenant_id' => $event->tenant_id,
+            'webhook_event_id' => $event->id,
+            'level' => $level,
+            'action' => $action,
+            'message' => $message,
+            'context' => $context,
+        ]);
+    }
+}
