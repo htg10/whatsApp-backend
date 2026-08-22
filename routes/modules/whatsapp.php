@@ -1,0 +1,24 @@
+<?php
+
+use App\Modules\WhatsApp\Controllers\WhatsAppAccountController;
+use Illuminate\Support\Facades\Route;
+
+/*
+| WhatsApp connection module. Mounted inside the ['auth:api','tenant'] group,
+| so every action is authenticated and tenant-scoped. Fine-grained permissions
+| (whatsapp.view / .connect / .manage) are enforced per-action via Gate.
+*/
+
+Route::prefix('whatsapp')->group(function () {
+    Route::get('/config', [WhatsAppAccountController::class, 'config']);
+    Route::get('/numbers', [WhatsAppAccountController::class, 'numbers']);
+    Route::get('/accounts', [WhatsAppAccountController::class, 'accounts']);
+
+    Route::post('/connect-manual', [WhatsAppAccountController::class, 'connectManual']);
+    Route::post('/embedded-signup', [WhatsAppAccountController::class, 'embeddedSignup']);
+
+    Route::post('/numbers/{number}/sync', [WhatsAppAccountController::class, 'sync']);
+    Route::post('/numbers/{number}/register', [WhatsAppAccountController::class, 'register']);
+    Route::post('/numbers/{number}/send-test', [WhatsAppAccountController::class, 'sendTest']);
+    Route::delete('/numbers/{number}', [WhatsAppAccountController::class, 'destroy']);
+});

@@ -1,0 +1,54 @@
+<?php
+
+namespace App\Modules\WhatsApp\Services;
+
+use App\Models\WhatsappPhoneNumber;
+use App\Support\Services\BaseService;
+
+/**
+ * Tenant-facing send seam. Resolves the right provider for a phone number's WABA
+ * and shapes Cloud API message payloads. Returns Meta's raw result (the wamid
+ * lives at data.messages[0].id). Persisting Message/Conversation rows is Phase 8.
+ */
+class WhatsAppMessageService extends BaseService
+{
+    public function __construct(private readonly WhatsAppProviderFactory $factory) {}
+
+    public function sendText(WhatsappPhoneNumber $phone, string $to, string $body, bool $previewUrl = false): array
+    {
+        return $this->provider($phone)->sendMessage($phone->phone_number_id, $to, [
+            'type' => 'text',
+            'text' => ['preview_url' => $previewUrl, 'body' => $body],
+        ]);
+    }
+
+    /**
+     * @param  array  $components  Cloud API template components (body/header/button params)
+     */
+    public function sendTemplate(WhatsappPhoneNumber $phone, string $to, string $templateName, string $language, array $components = []): array
+    {
+        $template = [
+            'name' => $templateName,
+            'language' => ['code' => $language],
+        ];
+
+        if ($components !== []) {
+            $template['components'] = $components;
+        }
+
+        return $this->provider($phone)->sendTemplate($phone->phone_number_id, $to, $template);
+    }
+
+    /** Convenience: extract the wamid from a send result, or null. */
+    public function wamid(array $result): ?string
+    {
+        return $result['messages'][0]['id'] ?? null;
+    }
+
+    private function provider(WhatsappPhoneNumber $phone)
+    {
+        $waba = $phone->businessAccount()->firstOrFail();
+
+        return $this->factory->for($waba);
+    }
+}
