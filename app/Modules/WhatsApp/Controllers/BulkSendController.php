@@ -57,7 +57,7 @@ class BulkSendController extends Controller
             userId: $request->user()->id,
             numbers: $data['numbers'],
             template: $data['template'],
-            language: $data['language'] ?? 'en',
+            language: $data['language'] ?? 'en_US',
         );
 
         return $this->ok(['bulk_send' => $result], 201);
