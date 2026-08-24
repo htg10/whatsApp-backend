@@ -46,13 +46,17 @@ class WhatsAppAccountService extends BaseService
      */
     public function connectManual(int $tenantId, array $data): WhatsappPhoneNumber
     {
-        if (WhatsappPhoneNumber::withTrashed()->where('phone_number_id', $data['phone_number_id'])->exists()) {
+        $existing = WhatsappPhoneNumber::withTrashed()
+            ->where('phone_number_id', $data['phone_number_id'])
+            ->first();
+
+        if ($existing && $existing->tenant_id !== $tenantId) {
             throw ValidationException::withMessages([
-                'phone_number_id' => ['This phone number is already connected.'],
+                'phone_number_id' => ['This phone number is connected to another account.'],
             ]);
         }
 
-        return DB::transaction(function () use ($tenantId, $data) {
+        return DB::transaction(function () use ($tenantId, $data, $existing) {
             $waba = WhatsappBusinessAccount::firstOrCreate(
                 ['tenant_id' => $tenantId, 'waba_id' => $data['waba_id']],
                 [
@@ -63,9 +67,19 @@ class WhatsAppAccountService extends BaseService
                 ],
             );
 
-            // Refresh the token if a new one was supplied on reconnect.
             if (($data['access_token'] ?? null) && $waba->wasRecentlyCreated === false) {
                 $waba->update(['access_token' => $data['access_token'], 'status' => 'connected']);
+            }
+
+            if ($existing) {
+                $existing->restore();
+                $existing->update([
+                    'whatsapp_business_account_id' => $waba->id,
+                    'display_phone_number' => $data['display_phone_number'],
+                    'verified_name' => $data['verified_name'] ?? $existing->verified_name,
+                    'status' => 'connected',
+                ]);
+                return $existing->fresh('businessAccount');
             }
 
             $phone = WhatsappPhoneNumber::create([
