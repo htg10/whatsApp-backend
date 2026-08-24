@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\WhatsApp\Controllers\BulkSendController;
 use App\Modules\WhatsApp\Controllers\InboxController;
 use App\Modules\WhatsApp\Controllers\WhatsAppAccountController;
 use Illuminate\Support\Facades\Route;
@@ -28,4 +29,9 @@ Route::prefix('whatsapp')->group(function () {
     Route::get('/conversations/{conversation}/messages', [InboxController::class, 'messages']);
     Route::post('/conversations/{conversation}/mark-read', [InboxController::class, 'markRead']);
     Route::post('/conversations/{conversation}/send', [InboxController::class, 'send']);
+
+    // Bulk send
+    Route::get('/bulk-sends', [BulkSendController::class, 'index']);
+    Route::get('/bulk-sends/{uuid}', [BulkSendController::class, 'show']);
+    Route::post('/bulk-send', [BulkSendController::class, 'store']);
 });
