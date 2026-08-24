@@ -4,7 +4,7 @@ return [
     'meta' => [
         'app_id'            => env('META_APP_ID'),
         'app_secret'        => env('META_APP_SECRET'),
-        'verify_token'      => env('META_VERIFY_TOKEN'),
+        'verify_token'      => env('META_VERIFY_TOKEN', env('WHATSAPP_WEBHOOK_VERIFY_TOKEN')),
         'api_version'       => env('META_API_VERSION', 'v23.0'),
         'config_id'         => env('META_CONFIG_ID'),
         // System User token is the production credential. Encrypted at rest per WABA
