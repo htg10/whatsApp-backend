@@ -95,6 +95,40 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
                 ->post("/{$phoneNumberId}/media", ['messaging_product' => 'whatsapp', 'type' => $mime]));
     }
 
+    public function downloadMedia(string $mediaId): array
+    {
+        $meta = $this->perform('GET', "/{$mediaId}", [],
+            fn (PendingRequest $g) => $g->get("/{$mediaId}"));
+
+        $mediaUrl = $meta['url'] ?? null;
+        if (! $mediaUrl) {
+            throw new WhatsAppApiException(
+                userMessage: 'Could not retrieve media URL.',
+                httpStatus: 502,
+                technicalMessage: "No url in media metadata for {$mediaId}",
+            );
+        }
+
+        $response = Http::withToken($this->token)
+            ->timeout($this->timeout)
+            ->get($mediaUrl);
+
+        if ($response->failed()) {
+            throw new WhatsAppApiException(
+                userMessage: 'Could not download media file.',
+                httpStatus: 502,
+                technicalMessage: "Media download failed: {$response->status()}",
+            );
+        }
+
+        return [
+            'content' => $response->body(),
+            'mime_type' => $meta['mime_type'] ?? null,
+            'file_size' => $meta['file_size'] ?? null,
+            'sha256' => $meta['sha256'] ?? null,
+        ];
+    }
+
     /**
      * Execute a Graph call: time it, log it (masked), then either return the JSON
      * body or throw a mapped WhatsAppApiException.

@@ -49,4 +49,14 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
     {
         return ['id' => 'media_' . Str::random(12)];
     }
+
+    public function downloadMedia(string $mediaId): array
+    {
+        return [
+            'content' => 'fake-binary-content',
+            'mime_type' => 'image/jpeg',
+            'file_size' => 1024,
+            'sha256' => 'fake_sha256',
+        ];
+    }
 }

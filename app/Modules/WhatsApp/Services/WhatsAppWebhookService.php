@@ -10,8 +10,10 @@ use App\Models\MessageStatus;
 use App\Models\WebhookEvent;
 use App\Models\WebhookLog;
 use App\Models\WhatsappPhoneNumber;
+use App\Modules\WhatsApp\Contracts\WhatsAppProviderInterface;
 use App\Support\Services\BaseService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class WhatsAppWebhookService extends BaseService
@@ -104,15 +106,38 @@ class WhatsAppWebhookService extends BaseService
 
         if (in_array($msgType, ['image', 'video', 'audio', 'document', 'sticker'])) {
             $mediaData = $msg[$msgType] ?? [];
-            MessageAttachment::create([
+            $metaMediaId = $mediaData['id'] ?? null;
+
+            $attachment = MessageAttachment::create([
                 'tenant_id' => $tenantId,
                 'message_id' => $message->id,
                 'type' => $msgType,
                 'mime_type' => $mediaData['mime_type'] ?? null,
-                'meta_media_id' => $mediaData['id'] ?? null,
+                'meta_media_id' => $metaMediaId,
                 'caption' => $mediaData['caption'] ?? null,
                 'file_name' => $mediaData['filename'] ?? null,
             ]);
+
+            if ($metaMediaId) {
+                try {
+                    $provider = app(WhatsAppProviderInterface::class);
+                    $downloaded = $provider->downloadMedia($metaMediaId);
+
+                    $ext = $this->guessExtension($downloaded['mime_type'] ?? $mediaData['mime_type'] ?? null, $msgType);
+                    $storagePath = "whatsapp/media/{$tenantId}/{$attachment->uuid}.{$ext}";
+
+                    Storage::disk('local')->put($storagePath, $downloaded['content']);
+
+                    $attachment->update([
+                        'storage_disk' => 'local',
+                        'storage_path' => $storagePath,
+                        'file_size' => $downloaded['file_size'] ?? strlen($downloaded['content']),
+                        'mime_type' => $downloaded['mime_type'] ?? $attachment->mime_type,
+                    ]);
+                } catch (\Throwable $e) {
+                    $this->log($event, 'warning', 'media.download_failed', "Failed to download media {$metaMediaId}: {$e->getMessage()}");
+                }
+            }
         }
 
         $conversation->update([
@@ -197,6 +222,28 @@ class WhatsAppWebhookService extends BaseService
         }
 
         $this->log($event, 'info', 'status.updated', "Status {$statusName} for wamid: {$wamid}");
+    }
+
+    private function guessExtension(?string $mime, string $fallbackType): string
+    {
+        $map = [
+            'image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif',
+            'video/mp4' => 'mp4', 'video/3gpp' => '3gp',
+            'audio/aac' => 'aac', 'audio/mp4' => 'm4a', 'audio/mpeg' => 'mp3', 'audio/amr' => 'amr',
+            'audio/ogg' => 'ogg', 'audio/ogg; codecs=opus' => 'ogg',
+            'application/pdf' => 'pdf',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+            'text/plain' => 'txt',
+            'image/webp' => 'webp',
+        ];
+
+        if ($mime && isset($map[$mime])) return $map[$mime];
+
+        return match ($fallbackType) {
+            'image' => 'jpg', 'video' => 'mp4', 'audio' => 'ogg', 'document' => 'bin', 'sticker' => 'webp',
+            default => 'bin',
+        };
     }
 
     private function extractBody(array $msg, string $type): ?string
