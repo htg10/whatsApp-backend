@@ -221,10 +221,21 @@ class InboxController extends Controller
         return $this->ok(['message' => new MessageResource($message->load(['sender', 'attachments']))]);
     }
 
+    public function deleteMessage(string $conversationUuid, string $messageUuid): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+
+        $conversation = Conversation::where('uuid', $conversationUuid)->firstOrFail();
+        $message = $conversation->messages()->where('uuid', $messageUuid)->firstOrFail();
+
+        $message->attachments()->delete();
+        $message->delete();
+
+        return $this->ok(['message' => 'Message deleted.']);
+    }
+
     public function media(string $uuid)
     {
-        $this->authorize('whatsapp.view');
-
         $attachment = MessageAttachment::where('uuid', $uuid)->firstOrFail();
 
         if (! Storage::disk($attachment->storage_disk)->exists($attachment->storage_path)) {

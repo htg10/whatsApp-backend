@@ -11,6 +11,9 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function () {
     Route::get('/health', fn() => response()->json(['success' => true, 'data' => ['status' => 'ok']]));
 
+    // Public media endpoint (UUID is unguessable, safe without auth)
+    Route::get('/whatsapp/media/{uuid}', [\App\Modules\WhatsApp\Controllers\InboxController::class, 'media']);
+
     // Auth module (public + auth:api-protected endpoints).
     require __DIR__ . '/modules/auth.php';
 
