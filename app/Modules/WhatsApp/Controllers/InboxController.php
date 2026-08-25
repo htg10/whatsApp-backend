@@ -5,11 +5,13 @@ namespace App\Modules\WhatsApp\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Models\MessageAttachment;
 use App\Modules\WhatsApp\Resources\ConversationResource;
 use App\Modules\WhatsApp\Resources\MessageResource;
 use App\Modules\WhatsApp\Services\WhatsAppMessageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class InboxController extends Controller
@@ -128,5 +130,111 @@ class InboxController extends Controller
         ]);
 
         return $this->ok(['message' => new MessageResource($message->load(['sender', 'attachments']))]);
+    }
+
+    private const MEDIA_TYPES = [
+        'image' => ['image/jpeg', 'image/png', 'image/webp'],
+        'video' => ['video/mp4', 'video/3gpp'],
+        'audio' => ['audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr', 'audio/ogg', 'audio/opus'],
+        'document' => [],
+    ];
+
+    public function sendMedia(Request $request, string $conversationUuid): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+
+        $conversation = Conversation::where('uuid', $conversationUuid)
+            ->with(['contact', 'phoneNumber'])
+            ->firstOrFail();
+
+        if (! $conversation->windowIsOpen()) {
+            return $this->fail('The 24-hour messaging window has expired. Send a template message to re-open the conversation.', 422);
+        }
+
+        $request->validate([
+            'file' => ['required', 'file', 'max:16384'],
+            'media_type' => ['required', 'in:image,video,audio,document'],
+            'caption' => ['nullable', 'string', 'max:1024'],
+        ]);
+
+        $file = $request->file('file');
+        $mediaType = $request->input('media_type');
+        $caption = $request->input('caption');
+        $mime = $file->getMimeType();
+
+        $allowedMimes = self::MEDIA_TYPES[$mediaType];
+        if ($allowedMimes !== [] && ! in_array($mime, $allowedMimes, true)) {
+            return $this->fail("Invalid file type for {$mediaType}. Got: {$mime}", 422);
+        }
+
+        $phone = $conversation->phoneNumber;
+        $to = $conversation->contact->wa_id;
+
+        $storedPath = $file->store("media/{$conversation->tenant_id}", 'local');
+
+        $result = $this->messages->sendMedia(
+            $phone,
+            $to,
+            $mediaType,
+            Storage::disk('local')->path($storedPath),
+            $mime,
+            $caption,
+            $file->getClientOriginalName(),
+        );
+
+        $wamid = $this->messages->wamid($result);
+        $bodyPreview = $caption ?: "[" . ucfirst($mediaType) . "]";
+
+        $message = Message::create([
+            'tenant_id' => $conversation->tenant_id,
+            'conversation_id' => $conversation->id,
+            'contact_id' => $conversation->contact_id,
+            'whatsapp_phone_number_id' => $phone->id,
+            'sender_user_id' => $request->user()->id,
+            'direction' => Message::DIRECTION_OUTBOUND,
+            'type' => $mediaType,
+            'body' => $bodyPreview,
+            'external_message_id' => $wamid,
+            'status' => 'sent',
+            'sent_at' => now(),
+            'payload' => $result,
+        ]);
+
+        MessageAttachment::create([
+            'tenant_id' => $conversation->tenant_id,
+            'message_id' => $message->id,
+            'type' => $mediaType,
+            'meta_media_id' => $result['messages'][0]['id'] ?? null,
+            'mime_type' => $mime,
+            'file_name' => $file->getClientOriginalName(),
+            'file_size' => $file->getSize(),
+            'storage_disk' => 'local',
+            'storage_path' => $storedPath,
+            'caption' => $caption,
+        ]);
+
+        $conversation->update([
+            'last_message_at' => now(),
+            'last_message_preview' => Str::limit($bodyPreview, 100),
+        ]);
+
+        return $this->ok(['message' => new MessageResource($message->load(['sender', 'attachments']))]);
+    }
+
+    public function media(string $uuid)
+    {
+        $this->authorize('whatsapp.view');
+
+        $attachment = MessageAttachment::where('uuid', $uuid)->firstOrFail();
+
+        if (! Storage::disk($attachment->storage_disk)->exists($attachment->storage_path)) {
+            abort(404, 'File not found.');
+        }
+
+        return Storage::disk($attachment->storage_disk)->response(
+            $attachment->storage_path,
+            $attachment->file_name,
+            ['Content-Type' => $attachment->mime_type]
+        );
     }
 }

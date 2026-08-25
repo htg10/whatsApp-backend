@@ -29,6 +29,8 @@ Route::prefix('whatsapp')->group(function () {
     Route::get('/conversations/{conversation}/messages', [InboxController::class, 'messages']);
     Route::post('/conversations/{conversation}/mark-read', [InboxController::class, 'markRead']);
     Route::post('/conversations/{conversation}/send', [InboxController::class, 'send']);
+    Route::post('/conversations/{conversation}/send-media', [InboxController::class, 'sendMedia']);
+    Route::get('/media/{uuid}', [InboxController::class, 'media']);
 
     // Bulk send
     Route::get('/bulk-sends', [BulkSendController::class, 'index']);

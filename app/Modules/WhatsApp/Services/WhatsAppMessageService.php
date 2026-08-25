@@ -39,6 +39,30 @@ class WhatsAppMessageService extends BaseService
         return $this->provider($phone)->sendTemplate($phone->phone_number_id, $to, $template);
     }
 
+    public function sendMedia(WhatsappPhoneNumber $phone, string $to, string $mediaType, string $filePath, string $mime, ?string $caption = null, ?string $fileName = null): array
+    {
+        $provider = $this->provider($phone);
+        $uploadResult = $provider->uploadMedia($phone->phone_number_id, $filePath, $mime);
+        $mediaId = $uploadResult['id'] ?? null;
+
+        if (! $mediaId) {
+            throw new \RuntimeException('Media upload failed — no media ID returned.');
+        }
+
+        $mediaPayload = ['id' => $mediaId];
+        if ($caption) {
+            $mediaPayload['caption'] = $caption;
+        }
+        if ($mediaType === 'document' && $fileName) {
+            $mediaPayload['filename'] = $fileName;
+        }
+
+        return $provider->sendMessage($phone->phone_number_id, $to, [
+            'type' => $mediaType,
+            $mediaType => $mediaPayload,
+        ]);
+    }
+
     /** Convenience: extract the wamid from a send result, or null. */
     public function wamid(array $result): ?string
     {

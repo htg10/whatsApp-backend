@@ -22,5 +22,7 @@ Route::prefix('v1')->group(function () {
         ]));
 
         require __DIR__ . '/modules/whatsapp.php';
+        require __DIR__ . '/modules/contacts.php';
+        require __DIR__ . '/modules/templates.php';
     });
 });
