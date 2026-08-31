@@ -25,20 +25,19 @@ class TeamController extends Controller
     private const USER_ROLE = 'user';
 
     /**
-     * Feature catalog the admin ticks. key => [label, permissions granted].
-     * Every permission here already exists (seeded) and the admin owns them.
+     * Fixed permission set every "User" gets — the day-to-day operational
+     * features. Excludes admin-only areas (Team, Billing, WhatsApp setup).
+     * All users have identical access; there is no per-user customisation.
      */
-    private const FEATURES = [
-        'inbox'       => ['label' => 'Inbox (chats)',   'perms' => ['conversations.view', 'conversations.reply', 'conversations.note', 'conversations.tag', 'conversations.status']],
-        'contacts'    => ['label' => 'Contacts',        'perms' => ['contacts.view', 'contacts.create', 'contacts.update']],
-        'campaigns'   => ['label' => 'Campaigns',       'perms' => ['campaigns.view', 'campaigns.create']],
-        'automations' => ['label' => 'Automations',     'perms' => ['workflows.view', 'workflows.create']],
-        'chatbot'     => ['label' => 'Chatbot',         'perms' => ['bots.view', 'bots.create']],
-        'agents'      => ['label' => 'Agents',          'perms' => ['agents.view']],
-        'templates'   => ['label' => 'Templates',       'perms' => ['templates.view']],
-        'analytics'   => ['label' => 'Analytics',       'perms' => ['analytics.view']],
-        'whatsapp'    => ['label' => 'WhatsApp setup',  'perms' => ['whatsapp.view']],
-        'billing'     => ['label' => 'Billing',         'perms' => ['billing.view']],
+    private const USER_PERMS = [
+        'conversations.view', 'conversations.reply', 'conversations.note', 'conversations.tag', 'conversations.status',
+        'contacts.view', 'contacts.create', 'contacts.update',
+        'campaigns.view', 'campaigns.create',
+        'workflows.view', 'workflows.create',
+        'bots.view', 'bots.create',
+        'agents.view',
+        'templates.view',
+        'analytics.view',
     ];
 
     public function index(Request $request): JsonResponse
@@ -56,7 +55,6 @@ class TeamController extends Controller
                 ['value' => 'admin', 'label' => 'Admin'],
                 ['value' => 'user', 'label' => 'User'],
             ],
-            'features' => collect(self::FEATURES)->map(fn ($f, $key) => ['key' => $key, 'label' => $f['label']])->values(),
         ]);
     }
 
@@ -71,8 +69,6 @@ class TeamController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users')->where(fn ($q) => $q->where('tenant_id', $tenantId))],
             'password' => ['required', 'string', 'min:8'],
             'role' => ['required', 'string', Rule::in(['admin', 'user'])],
-            'features' => ['nullable', 'array'],
-            'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
 
         $user = User::create([
@@ -85,7 +81,7 @@ class TeamController extends Controller
             'email_verified_at' => now(),
         ]);
 
-        $this->applyAccess($user, $data['role'], $data['features'] ?? []);
+        $this->applyAccess($user, $data['role']);
 
         return $this->ok(['member' => $this->memberArray($user->fresh())], 201);
     }
@@ -99,19 +95,14 @@ class TeamController extends Controller
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'role' => ['sometimes', 'required', 'string', Rule::in(['admin', 'user'])],
-            'features' => ['nullable', 'array'],
-            'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
 
         if (isset($data['name'])) {
             $user->update(['name' => $data['name']]);
         }
 
-        // Re-apply access whenever role or features are provided.
-        if (isset($data['role']) || array_key_exists('features', $data)) {
-            $role = $data['role'] ?? $this->roleKey($user);
-            $features = $data['features'] ?? $this->featureKeys($user);
-            $this->applyAccess($user, $role, $features);
+        if (isset($data['role'])) {
+            $this->applyAccess($user, $data['role']);
         }
 
         return $this->ok(['member' => $this->memberArray($user->fresh())]);
@@ -147,26 +138,22 @@ class TeamController extends Controller
 
     // ---- access application ----
 
-    /** Assign the role and (for Users) grant exactly the ticked features. */
-    private function applyAccess(User $user, string $role, array $features): void
+    /**
+     * Apply the chosen role. Admins get everything via the owner role; Users get
+     * the same fixed operational permission set, granted directly.
+     */
+    private function applyAccess(User $user, string $role): void
     {
         if ($role === 'admin') {
             Role::findOrCreate(self::ADMIN_ROLE, 'api');
             $user->syncRoles([self::ADMIN_ROLE]);
-            $user->syncPermissions([]); // admin gets everything via the role
+            $user->syncPermissions([]); // everything comes via the owner role
             return;
         }
 
-        Role::findOrCreate(self::USER_ROLE, 'api'); // role with no base permissions
+        Role::findOrCreate(self::USER_ROLE, 'api'); // marker role, no base permissions
         $user->syncRoles([self::USER_ROLE]);
-
-        $perms = collect($features)
-            ->flatMap(fn ($key) => self::FEATURES[$key]['perms'] ?? [])
-            ->unique()
-            ->values()
-            ->all();
-
-        $user->syncPermissions($perms);
+        $user->syncPermissions(self::USER_PERMS);   // identical access for every user
     }
 
     private function findMember(Request $request, string $uuid): User
@@ -183,22 +170,6 @@ class TeamController extends Controller
         return $user->hasRole(self::ADMIN_ROLE) ? 'admin' : 'user';
     }
 
-    /** Feature keys the user currently has (based on the feature's first permission). */
-    private function featureKeys(User $user): array
-    {
-        if ($user->hasRole(self::ADMIN_ROLE)) {
-            return array_keys(self::FEATURES); // admin has all
-        }
-        $has = $user->getAllPermissions()->pluck('name')->all();
-        $keys = [];
-        foreach (self::FEATURES as $key => $f) {
-            if (in_array($f['perms'][0], $has, true)) {
-                $keys[] = $key;
-            }
-        }
-        return $keys;
-    }
-
     private function memberArray(User $u): array
     {
         $roleKey = $this->roleKey($u);
@@ -209,7 +180,6 @@ class TeamController extends Controller
             'status' => $u->status,
             'role' => $roleKey,
             'role_label' => $roleKey === 'admin' ? 'Admin' : 'User',
-            'features' => $this->featureKeys($u),
             'last_login_at' => $u->last_login_at?->toIso8601String(),
             'created_at' => $u->created_at?->toIso8601String(),
         ];
