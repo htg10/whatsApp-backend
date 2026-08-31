@@ -1,0 +1,14 @@
+<?php
+
+use App\Modules\Social\Controllers\SocialController;
+use Illuminate\Support\Facades\Route;
+
+Route::prefix('social')->group(function () {
+    Route::get('/connection', [SocialController::class, 'connection']);
+    Route::post('/connect', [SocialController::class, 'connect']);
+    Route::delete('/connection', [SocialController::class, 'disconnect']);
+
+    Route::get('/posts', [SocialController::class, 'posts']);
+    Route::post('/posts', [SocialController::class, 'createPost']);
+    Route::post('/posts/{uuid}/publish', [SocialController::class, 'publish']);
+});

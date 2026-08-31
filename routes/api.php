@@ -34,5 +34,6 @@ Route::prefix('v1')->group(function () {
         require __DIR__ . '/modules/agents.php';
         require __DIR__ . '/modules/billing.php';
         require __DIR__ . '/modules/team.php';
+        require __DIR__ . '/modules/social.php';
     });
 });
