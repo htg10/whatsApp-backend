@@ -50,7 +50,24 @@ class BulkSendController extends Controller
             'numbers.*' => ['required', 'string', 'max:20'],
             'template' => ['required', 'string', 'max:512'],
             'language' => ['nullable', 'string', 'max:16'],
+            // Ordered BODY variable values ({{1}}, {{2}}, …). Same values go to
+            // every recipient (bulk send is one message to many numbers).
+            'variables' => ['nullable', 'array', 'max:20'],
+            'variables.*' => ['nullable', 'string', 'max:1024'],
         ]);
+
+        // Build the Meta template "components" payload for body variables.
+        $components = [];
+        $variables = $data['variables'] ?? [];
+        if (! empty($variables)) {
+            $components[] = [
+                'type' => 'body',
+                'parameters' => array_map(
+                    fn ($v) => ['type' => 'text', 'text' => (string) $v],
+                    array_values($variables)
+                ),
+            ];
+        }
 
         $result = $this->service->send(
             tenantId: $request->user()->tenant_id,
@@ -58,6 +75,7 @@ class BulkSendController extends Controller
             numbers: $data['numbers'],
             template: $data['template'],
             language: $data['language'] ?? 'en_US',
+            components: $components,
         );
 
         return $this->ok(['bulk_send' => $result], 201);

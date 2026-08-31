@@ -12,7 +12,7 @@ class BulkSendService extends BaseService
 {
     public function __construct(private readonly WhatsAppMessageService $messages) {}
 
-    public function send(int $tenantId, int $userId, array $numbers, string $template, string $language): BulkSend
+    public function send(int $tenantId, int $userId, array $numbers, string $template, string $language, array $components = []): BulkSend
     {
         $phone = WhatsappPhoneNumber::withoutGlobalScopes()
             ->where('tenant_id', $tenantId)
@@ -56,7 +56,7 @@ class BulkSendService extends BaseService
 
         foreach ($recipients as $recipient) {
             try {
-                $result = $this->messages->sendTemplate($phone, $recipient->phone, $template, $language);
+                $result = $this->messages->sendTemplate($phone, $recipient->phone, $template, $language, $components);
                 $wamid = $this->messages->wamid($result);
                 $recipient->update([
                     'status' => 'sent',
