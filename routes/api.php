@@ -32,5 +32,6 @@ Route::prefix('v1')->group(function () {
         require __DIR__ . '/modules/automations.php';
         require __DIR__ . '/modules/chatbot.php';
         require __DIR__ . '/modules/agents.php';
+        require __DIR__ . '/modules/billing.php';
     });
 });
