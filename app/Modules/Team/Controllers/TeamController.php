@@ -11,14 +11,35 @@ use Illuminate\Validation\Rule;
 use Spatie\Permission\Models\Role;
 
 /**
- * Company team management — the workspace admin lists, invites, re-roles, and
- * deactivates users within their own tenant. Platform/super-admin users are
- * never exposed or editable here.
+ * Company team management. Two roles only:
+ *   - Admin ("tenant-owner"): full access to everything, manages users.
+ *   - User ("user"): sees ONLY the features the admin ticked when creating them.
+ *
+ * A User has no role-level permissions; the admin grants per-feature permissions
+ * directly on the user, so the frontend nav (gated by user.permissions) shows
+ * exactly the ticked features.
  */
 class TeamController extends Controller
 {
-    /** Roles a company admin may assign (never super-admin). */
-    private const ASSIGNABLE = ['tenant-owner', 'manager', 'agent'];
+    private const ADMIN_ROLE = 'tenant-owner';
+    private const USER_ROLE = 'user';
+
+    /**
+     * Feature catalog the admin ticks. key => [label, permissions granted].
+     * Every permission here already exists (seeded) and the admin owns them.
+     */
+    private const FEATURES = [
+        'inbox'       => ['label' => 'Inbox (chats)',   'perms' => ['conversations.view', 'conversations.reply', 'conversations.note', 'conversations.tag', 'conversations.status']],
+        'contacts'    => ['label' => 'Contacts',        'perms' => ['contacts.view', 'contacts.create', 'contacts.update']],
+        'campaigns'   => ['label' => 'Campaigns',       'perms' => ['campaigns.view', 'campaigns.create']],
+        'automations' => ['label' => 'Automations',     'perms' => ['workflows.view', 'workflows.create']],
+        'chatbot'     => ['label' => 'Chatbot',         'perms' => ['bots.view', 'bots.create']],
+        'agents'      => ['label' => 'Agents',          'perms' => ['agents.view']],
+        'templates'   => ['label' => 'Templates',       'perms' => ['templates.view']],
+        'analytics'   => ['label' => 'Analytics',       'perms' => ['analytics.view']],
+        'whatsapp'    => ['label' => 'WhatsApp setup',  'perms' => ['whatsapp.view']],
+        'billing'     => ['label' => 'Billing',         'perms' => ['billing.view']],
+    ];
 
     public function index(Request $request): JsonResponse
     {
@@ -31,7 +52,11 @@ class TeamController extends Controller
 
         return $this->ok([
             'members' => $users->map(fn (User $u) => $this->memberArray($u)),
-            'roles' => $this->assignableRoles(),
+            'roles' => [
+                ['value' => 'admin', 'label' => 'Admin'],
+                ['value' => 'user', 'label' => 'User'],
+            ],
+            'features' => collect(self::FEATURES)->map(fn ($f, $key) => ['key' => $key, 'label' => $f['label']])->values(),
         ]);
     }
 
@@ -45,7 +70,9 @@ class TeamController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users')->where(fn ($q) => $q->where('tenant_id', $tenantId))],
             'password' => ['required', 'string', 'min:8'],
-            'role' => ['required', 'string', Rule::in(self::ASSIGNABLE)],
+            'role' => ['required', 'string', Rule::in(['admin', 'user'])],
+            'features' => ['nullable', 'array'],
+            'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
 
         $user = User::create([
@@ -58,9 +85,9 @@ class TeamController extends Controller
             'email_verified_at' => now(),
         ]);
 
-        $user->assignRole($data['role']);
+        $this->applyAccess($user, $data['role'], $data['features'] ?? []);
 
-        return $this->ok(['member' => $this->memberArray($user)], 201);
+        return $this->ok(['member' => $this->memberArray($user->fresh())], 201);
     }
 
     public function update(Request $request, string $uuid): JsonResponse
@@ -71,14 +98,20 @@ class TeamController extends Controller
 
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'role' => ['sometimes', 'required', 'string', Rule::in(self::ASSIGNABLE)],
+            'role' => ['sometimes', 'required', 'string', Rule::in(['admin', 'user'])],
+            'features' => ['nullable', 'array'],
+            'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
 
         if (isset($data['name'])) {
             $user->update(['name' => $data['name']]);
         }
-        if (isset($data['role'])) {
-            $user->syncRoles([$data['role']]);
+
+        // Re-apply access whenever role or features are provided.
+        if (isset($data['role']) || array_key_exists('features', $data)) {
+            $role = $data['role'] ?? $this->roleKey($user);
+            $features = $data['features'] ?? $this->featureKeys($user);
+            $this->applyAccess($user, $role, $features);
         }
 
         return $this->ok(['member' => $this->memberArray($user->fresh())]);
@@ -87,7 +120,6 @@ class TeamController extends Controller
     public function toggle(Request $request, string $uuid): JsonResponse
     {
         $this->authorize('team.update');
-
         $user = $this->findMember($request, $uuid);
 
         if ($user->id === $request->user()->id) {
@@ -102,7 +134,6 @@ class TeamController extends Controller
     public function destroy(Request $request, string $uuid): JsonResponse
     {
         $this->authorize('team.remove');
-
         $user = $this->findMember($request, $uuid);
 
         if ($user->id === $request->user()->id) {
@@ -114,7 +145,29 @@ class TeamController extends Controller
         return $this->ok(['message' => 'Team member removed.']);
     }
 
-    // ---- helpers ----
+    // ---- access application ----
+
+    /** Assign the role and (for Users) grant exactly the ticked features. */
+    private function applyAccess(User $user, string $role, array $features): void
+    {
+        if ($role === 'admin') {
+            Role::findOrCreate(self::ADMIN_ROLE, 'api');
+            $user->syncRoles([self::ADMIN_ROLE]);
+            $user->syncPermissions([]); // admin gets everything via the role
+            return;
+        }
+
+        Role::findOrCreate(self::USER_ROLE, 'api'); // role with no base permissions
+        $user->syncRoles([self::USER_ROLE]);
+
+        $perms = collect($features)
+            ->flatMap(fn ($key) => self::FEATURES[$key]['perms'] ?? [])
+            ->unique()
+            ->values()
+            ->all();
+
+        $user->syncPermissions($perms);
+    }
 
     private function findMember(Request $request, string $uuid): User
     {
@@ -124,29 +177,41 @@ class TeamController extends Controller
             ->firstOrFail();
     }
 
+    /** "admin" if the user has the owner role, else "user". */
+    private function roleKey(User $user): string
+    {
+        return $user->hasRole(self::ADMIN_ROLE) ? 'admin' : 'user';
+    }
+
+    /** Feature keys the user currently has (based on the feature's first permission). */
+    private function featureKeys(User $user): array
+    {
+        if ($user->hasRole(self::ADMIN_ROLE)) {
+            return array_keys(self::FEATURES); // admin has all
+        }
+        $has = $user->getAllPermissions()->pluck('name')->all();
+        $keys = [];
+        foreach (self::FEATURES as $key => $f) {
+            if (in_array($f['perms'][0], $has, true)) {
+                $keys[] = $key;
+            }
+        }
+        return $keys;
+    }
+
     private function memberArray(User $u): array
     {
+        $roleKey = $this->roleKey($u);
         return [
             'id' => $u->uuid,
             'name' => $u->name,
             'email' => $u->email,
             'status' => $u->status,
-            'role' => $u->getRoleNames()->first(),
-            'roles' => $u->getRoleNames()->values(),
+            'role' => $roleKey,
+            'role_label' => $roleKey === 'admin' ? 'Admin' : 'User',
+            'features' => $this->featureKeys($u),
             'last_login_at' => $u->last_login_at?->toIso8601String(),
             'created_at' => $u->created_at?->toIso8601String(),
         ];
-    }
-
-    /** @return array<int,array{value:string,label:string}> */
-    private function assignableRoles(): array
-    {
-        $labels = ['tenant-owner' => 'Owner', 'manager' => 'Manager', 'agent' => 'Agent'];
-
-        return collect(self::ASSIGNABLE)
-            ->filter(fn ($r) => Role::where('name', $r)->where('guard_name', 'api')->exists())
-            ->map(fn ($r) => ['value' => $r, 'label' => $labels[$r] ?? $r])
-            ->values()
-            ->all();
     }
 }
