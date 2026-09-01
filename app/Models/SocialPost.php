@@ -12,7 +12,7 @@ class SocialPost extends Model
     use BelongsToTenant, HasFactory, HasUuid;
 
     protected $fillable = [
-        'tenant_id', 'caption', 'image_url', 'image_path', 'targets',
+        'tenant_id', 'caption', 'image_url', 'media_type', 'image_path', 'targets',
         'status', 'scheduled_at', 'published_at', 'results', 'created_by',
     ];
 

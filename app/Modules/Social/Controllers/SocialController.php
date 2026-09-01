@@ -88,7 +88,7 @@ class SocialController extends Controller
         $data = $request->validate([
             'caption' => ['nullable', 'string', 'max:2200'],
             'image_url' => ['nullable', 'url', 'max:2048'],
-            'image' => ['nullable', 'image', 'max:8192'], // 8 MB
+            'image' => ['nullable', 'file', 'mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/quicktime', 'max:204800'], // 200 MB
             'targets' => ['required', 'array', 'min:1'],
             'targets.*' => ['string', 'in:facebook,instagram'],
             'scheduled_at' => ['nullable', 'date', 'after:now'],
@@ -99,23 +99,30 @@ class SocialController extends Controller
             return $this->fail('Connect a Facebook Page first.', [], 422);
         }
 
-        // Resolve a public image URL (uploaded file or pasted URL).
-        $imageUrl = $data['image_url'] ?? null;
-        $imagePath = null;
+        // Resolve a public media URL (uploaded file or pasted URL) and its type.
+        $mediaUrl = $data['image_url'] ?? null;
+        $mediaPath = null;
+        $mediaType = 'image';
+
         if ($request->hasFile('image')) {
-            $imagePath = $request->file('image')->store('social/' . $request->user()->tenant_id, 'public');
-            $imageUrl = rtrim((string) config('app.url'), '/') . '/storage/' . $imagePath;
+            $file = $request->file('image');
+            $mediaType = str_starts_with((string) $file->getMimeType(), 'video') ? 'video' : 'image';
+            $mediaPath = $file->store('social/' . $request->user()->tenant_id, 'public');
+            $mediaUrl = rtrim((string) config('app.url'), '/') . '/storage/' . $mediaPath;
+        } elseif ($mediaUrl) {
+            $mediaType = preg_match('/\.(mp4|mov|m4v|webm)(\?.*)?$/i', $mediaUrl) ? 'video' : 'image';
         }
 
-        if (! $imageUrl) {
-            return $this->fail('A photo is required — upload one or paste a public image URL.', [], 422);
+        if (! $mediaUrl) {
+            return $this->fail('A photo or video is required — upload one or paste a public URL.', [], 422);
         }
 
         $post = SocialPost::create([
             'tenant_id' => $request->user()->tenant_id,
             'caption' => $data['caption'] ?? null,
-            'image_url' => $imageUrl,
-            'image_path' => $imagePath,
+            'image_url' => $mediaUrl,
+            'media_type' => $mediaType,
+            'image_path' => $mediaPath,
             'targets' => array_values(array_unique($data['targets'])),
             'status' => isset($data['scheduled_at']) ? 'scheduled' : 'draft',
             'scheduled_at' => $data['scheduled_at'] ?? null,
@@ -153,9 +160,13 @@ class SocialController extends Controller
         $ok = 0;
         $fail = 0;
 
+        $isVideo = $post->media_type === 'video';
+
         if (in_array('facebook', $post->targets, true)) {
             try {
-                $id = $this->meta->publishFacebook($conn->page_id, $conn->page_access_token, $post->image_url, $post->caption);
+                $id = $isVideo
+                    ? $this->meta->publishFacebookVideo($conn->page_id, $conn->page_access_token, $post->image_url, $post->caption)
+                    : $this->meta->publishFacebook($conn->page_id, $conn->page_access_token, $post->image_url, $post->caption);
                 $results['facebook'] = ['status' => 'published', 'id' => $id];
                 $ok++;
             } catch (\Throwable $e) {
@@ -170,7 +181,9 @@ class SocialController extends Controller
                 $fail++;
             } else {
                 try {
-                    $id = $this->meta->publishInstagram($conn->ig_user_id, $conn->page_access_token, $post->image_url, $post->caption);
+                    $id = $isVideo
+                        ? $this->meta->publishInstagramVideo($conn->ig_user_id, $conn->page_access_token, $post->image_url, $post->caption)
+                        : $this->meta->publishInstagram($conn->ig_user_id, $conn->page_access_token, $post->image_url, $post->caption);
                     $results['instagram'] = ['status' => 'published', 'id' => $id];
                     $ok++;
                 } catch (\Throwable $e) {
@@ -209,6 +222,7 @@ class SocialController extends Controller
             'id' => $p->uuid,
             'caption' => $p->caption,
             'image_url' => $p->image_url,
+            'media_type' => $p->media_type,
             'targets' => $p->targets,
             'status' => $p->status,
             'results' => $p->results,

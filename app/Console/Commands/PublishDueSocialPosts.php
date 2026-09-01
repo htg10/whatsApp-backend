@@ -43,10 +43,13 @@ class PublishDueSocialPosts extends Command
 
             $results = [];
             $ok = 0; $fail = 0;
+            $isVideo = $post->media_type === 'video';
 
             if (in_array('facebook', $post->targets, true)) {
                 try {
-                    $id = $meta->publishFacebook($conn->page_id, $conn->page_access_token, $post->image_url, $post->caption);
+                    $id = $isVideo
+                        ? $meta->publishFacebookVideo($conn->page_id, $conn->page_access_token, $post->image_url, $post->caption)
+                        : $meta->publishFacebook($conn->page_id, $conn->page_access_token, $post->image_url, $post->caption);
                     $results['facebook'] = ['status' => 'published', 'id' => $id]; $ok++;
                 } catch (\Throwable $e) {
                     $results['facebook'] = ['status' => 'failed', 'error' => Str::limit($e->getMessage(), 300)]; $fail++;
@@ -58,7 +61,9 @@ class PublishDueSocialPosts extends Command
                     $results['instagram'] = ['status' => 'failed', 'error' => 'No Instagram Business account linked.']; $fail++;
                 } else {
                     try {
-                        $id = $meta->publishInstagram($conn->ig_user_id, $conn->page_access_token, $post->image_url, $post->caption);
+                        $id = $isVideo
+                            ? $meta->publishInstagramVideo($conn->ig_user_id, $conn->page_access_token, $post->image_url, $post->caption)
+                            : $meta->publishInstagram($conn->ig_user_id, $conn->page_access_token, $post->image_url, $post->caption);
                         $results['instagram'] = ['status' => 'published', 'id' => $id]; $ok++;
                     } catch (\Throwable $e) {
                         $results['instagram'] = ['status' => 'failed', 'error' => Str::limit($e->getMessage(), 300)]; $fail++;

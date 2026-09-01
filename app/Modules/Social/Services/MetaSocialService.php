@@ -77,6 +77,68 @@ class MetaSocialService
         return (string) $publish->json('id');
     }
 
+    /** Publish a video to the Facebook Page. Returns the new video id. */
+    public function publishFacebookVideo(string $pageId, string $token, string $videoUrl, ?string $caption): string
+    {
+        $res = Http::timeout(120)->asForm()->post("{$this->base}/{$pageId}/videos", [
+            'file_url' => $videoUrl,
+            'description' => (string) $caption,
+            'access_token' => $token,
+        ]);
+        $this->guard($res, 'Facebook video publish failed');
+
+        return (string) ($res->json('id') ?? '');
+    }
+
+    /**
+     * Publish a Reel to Instagram: create a REELS container, wait for Meta to
+     * finish processing the video, then publish.
+     */
+    public function publishInstagramVideo(string $igUserId, string $token, string $videoUrl, ?string $caption): string
+    {
+        $create = Http::timeout(120)->asForm()->post("{$this->base}/{$igUserId}/media", [
+            'media_type' => 'REELS',
+            'video_url' => $videoUrl,
+            'caption' => (string) $caption,
+            'access_token' => $token,
+        ]);
+        $this->guard($create, 'Instagram reel creation failed');
+
+        $creationId = $create->json('id');
+        if (! $creationId) {
+            throw new \RuntimeException('Instagram reel creation returned no id.');
+        }
+
+        // Poll processing status (videos take time). ~90s max.
+        $status = 'IN_PROGRESS';
+        for ($i = 0; $i < 18; $i++) {
+            sleep(5);
+            $check = Http::timeout(30)->get("{$this->base}/{$creationId}", [
+                'fields' => 'status_code',
+                'access_token' => $token,
+            ]);
+            $status = $check->json('status_code') ?? $status;
+            if ($status === 'FINISHED') {
+                break;
+            }
+            if ($status === 'ERROR') {
+                throw new \RuntimeException('Instagram could not process the video.');
+            }
+        }
+
+        if ($status !== 'FINISHED') {
+            throw new \RuntimeException('Instagram is still processing the video — try Publish now again in a minute.');
+        }
+
+        $publish = Http::timeout(60)->asForm()->post("{$this->base}/{$igUserId}/media_publish", [
+            'creation_id' => $creationId,
+            'access_token' => $token,
+        ]);
+        $this->guard($publish, 'Instagram reel publish failed');
+
+        return (string) $publish->json('id');
+    }
+
     /** Turn a Graph API error response into a clean exception message. */
     private function guard(\Illuminate\Http\Client\Response $res, string $context): void
     {
