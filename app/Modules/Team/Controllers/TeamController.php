@@ -11,33 +11,31 @@ use Illuminate\Validation\Rule;
 use Spatie\Permission\Models\Role;
 
 /**
- * Company team management. Two roles only:
- *   - Admin ("tenant-owner"): full access to everything, manages users.
- *   - User ("user"): sees ONLY the features the admin ticked when creating them.
+ * A company (workspace owner) manages its own people. Two in-company roles:
+ *   - Admin ("tenant-owner"): full access to everything in the workspace.
+ *   - Agent ("agent"): sees ONLY the features the admin ticked when creating them.
  *
- * A User has no role-level permissions; the admin grants per-feature permissions
- * directly on the user, so the frontend nav (gated by user.permissions) shows
- * exactly the ticked features.
+ * Agents get their features as direct permissions, so the frontend nav (gated by
+ * user.permissions) shows exactly what was ticked.
  */
 class TeamController extends Controller
 {
     private const ADMIN_ROLE = 'tenant-owner';
-    private const USER_ROLE = 'user';
+    private const AGENT_ROLE = 'agent';
 
-    /**
-     * Fixed permission set every "User" gets — the day-to-day operational
-     * features. Excludes admin-only areas (Team, Billing, WhatsApp setup).
-     * All users have identical access; there is no per-user customisation.
-     */
-    private const USER_PERMS = [
-        'conversations.view', 'conversations.reply', 'conversations.note', 'conversations.tag', 'conversations.status',
-        'contacts.view', 'contacts.create', 'contacts.update',
-        'campaigns.view', 'campaigns.create',
-        'workflows.view', 'workflows.create',
-        'bots.view', 'bots.create',
-        'agents.view',
-        'templates.view',
-        'analytics.view',
+    /** Feature catalog the admin ticks for an agent. key => [label, permissions]. */
+    private const FEATURES = [
+        'inbox'       => ['label' => 'Inbox (chats)',   'perms' => ['conversations.view', 'conversations.reply', 'conversations.note', 'conversations.tag', 'conversations.status']],
+        'contacts'    => ['label' => 'Contacts',        'perms' => ['contacts.view', 'contacts.create', 'contacts.update']],
+        'campaigns'   => ['label' => 'Campaigns',       'perms' => ['campaigns.view', 'campaigns.create']],
+        'social'      => ['label' => 'Social',          'perms' => ['campaigns.view', 'campaigns.create']],
+        'automations' => ['label' => 'Automations',     'perms' => ['workflows.view', 'workflows.create']],
+        'chatbot'     => ['label' => 'Chatbot',         'perms' => ['bots.view', 'bots.create']],
+        'agents'      => ['label' => 'Agents',          'perms' => ['agents.view']],
+        'templates'   => ['label' => 'Templates',       'perms' => ['templates.view']],
+        'analytics'   => ['label' => 'Analytics',       'perms' => ['analytics.view']],
+        'whatsapp'    => ['label' => 'WhatsApp setup',  'perms' => ['whatsapp.view']],
+        'billing'     => ['label' => 'Billing',         'perms' => ['billing.view']],
     ];
 
     public function index(Request $request): JsonResponse
@@ -53,22 +51,24 @@ class TeamController extends Controller
             'members' => $users->map(fn (User $u) => $this->memberArray($u)),
             'roles' => [
                 ['value' => 'admin', 'label' => 'Admin'],
-                ['value' => 'user', 'label' => 'User'],
+                ['value' => 'agent', 'label' => 'Agent'],
             ],
+            'features' => collect(self::FEATURES)->map(fn ($f, $key) => ['key' => $key, 'label' => $f['label']])->values(),
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
         $this->authorize('team.invite');
-
         $tenantId = $request->user()->tenant_id;
 
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users')->where(fn ($q) => $q->where('tenant_id', $tenantId))],
             'password' => ['required', 'string', 'min:8'],
-            'role' => ['required', 'string', Rule::in(['admin', 'user'])],
+            'role' => ['required', 'string', Rule::in(['admin', 'agent'])],
+            'features' => ['nullable', 'array'],
+            'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
 
         $user = User::create([
@@ -81,7 +81,7 @@ class TeamController extends Controller
             'email_verified_at' => now(),
         ]);
 
-        $this->applyAccess($user, $data['role']);
+        $this->applyAccess($user, $data['role'], $data['features'] ?? []);
 
         return $this->ok(['member' => $this->memberArray($user->fresh())], 201);
     }
@@ -89,20 +89,22 @@ class TeamController extends Controller
     public function update(Request $request, string $uuid): JsonResponse
     {
         $this->authorize('team.update');
-
         $user = $this->findMember($request, $uuid);
 
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'role' => ['sometimes', 'required', 'string', Rule::in(['admin', 'user'])],
+            'role' => ['sometimes', 'required', 'string', Rule::in(['admin', 'agent'])],
+            'features' => ['nullable', 'array'],
+            'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
 
         if (isset($data['name'])) {
             $user->update(['name' => $data['name']]);
         }
-
-        if (isset($data['role'])) {
-            $this->applyAccess($user, $data['role']);
+        if (isset($data['role']) || array_key_exists('features', $data)) {
+            $role = $data['role'] ?? $this->roleKey($user);
+            $features = $data['features'] ?? $this->featureKeys($user);
+            $this->applyAccess($user, $role, $features);
         }
 
         return $this->ok(['member' => $this->memberArray($user->fresh())]);
@@ -116,7 +118,6 @@ class TeamController extends Controller
         if ($user->id === $request->user()->id) {
             return $this->fail('You cannot deactivate your own account.', [], 422);
         }
-
         $user->update(['status' => $user->status === 'active' ? 'suspended' : 'active']);
 
         return $this->ok(['member' => $this->memberArray($user->fresh())]);
@@ -130,30 +131,29 @@ class TeamController extends Controller
         if ($user->id === $request->user()->id) {
             return $this->fail('You cannot remove your own account.', [], 422);
         }
-
         $user->delete();
 
         return $this->ok(['message' => 'Team member removed.']);
     }
 
-    // ---- access application ----
+    // ---- access ----
 
-    /**
-     * Apply the chosen role. Admins get everything via the owner role; Users get
-     * the same fixed operational permission set, granted directly.
-     */
-    private function applyAccess(User $user, string $role): void
+    private function applyAccess(User $user, string $role, array $features): void
     {
         if ($role === 'admin') {
             Role::findOrCreate(self::ADMIN_ROLE, 'api');
             $user->syncRoles([self::ADMIN_ROLE]);
-            $user->syncPermissions([]); // everything comes via the owner role
+            $user->syncPermissions([]); // full access via role
             return;
         }
 
-        Role::findOrCreate(self::USER_ROLE, 'api'); // marker role, no base permissions
-        $user->syncRoles([self::USER_ROLE]);
-        $user->syncPermissions(self::USER_PERMS);   // identical access for every user
+        Role::findOrCreate(self::AGENT_ROLE, 'api');
+        $user->syncRoles([self::AGENT_ROLE]);
+
+        $perms = collect($features)
+            ->flatMap(fn ($key) => self::FEATURES[$key]['perms'] ?? [])
+            ->unique()->values()->all();
+        $user->syncPermissions($perms);
     }
 
     private function findMember(Request $request, string $uuid): User
@@ -164,10 +164,24 @@ class TeamController extends Controller
             ->firstOrFail();
     }
 
-    /** "admin" if the user has the owner role, else "user". */
     private function roleKey(User $user): string
     {
-        return $user->hasRole(self::ADMIN_ROLE) ? 'admin' : 'user';
+        return $user->hasRole(self::ADMIN_ROLE) ? 'admin' : 'agent';
+    }
+
+    private function featureKeys(User $user): array
+    {
+        if ($user->hasRole(self::ADMIN_ROLE)) {
+            return array_keys(self::FEATURES);
+        }
+        $has = $user->getAllPermissions()->pluck('name')->all();
+        $keys = [];
+        foreach (self::FEATURES as $key => $f) {
+            if (in_array($f['perms'][0], $has, true)) {
+                $keys[] = $key;
+            }
+        }
+        return $keys;
     }
 
     private function memberArray(User $u): array
@@ -179,7 +193,8 @@ class TeamController extends Controller
             'email' => $u->email,
             'status' => $u->status,
             'role' => $roleKey,
-            'role_label' => $roleKey === 'admin' ? 'Admin' : 'User',
+            'role_label' => $roleKey === 'admin' ? 'Admin' : 'Agent',
+            'features' => $this->featureKeys($u),
             'last_login_at' => $u->last_login_at?->toIso8601String(),
             'created_at' => $u->created_at?->toIso8601String(),
         ];
