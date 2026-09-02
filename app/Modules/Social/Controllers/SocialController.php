@@ -42,7 +42,6 @@ class SocialController extends Controller
             return $this->fail('Could not verify the Facebook Page: ' . $e->getMessage(), [], 422);
         }
 
-        $conn = SocialConnection::first();
         $attributes = [
             'page_id' => $data['page_id'],
             'page_name' => $info['name'],
@@ -52,10 +51,17 @@ class SocialController extends Controller
             'status' => 'connected',
         ];
 
-        if ($conn) {
-            $conn->update($attributes);
-        } else {
-            $conn = SocialConnection::create(array_merge($attributes, ['tenant_id' => $request->user()->tenant_id]));
+        try {
+            $conn = SocialConnection::first();
+            if ($conn) {
+                $conn->update($attributes);
+            } else {
+                $conn = SocialConnection::create(array_merge($attributes, ['tenant_id' => $request->user()->tenant_id]));
+            }
+        } catch (\Throwable $e) {
+            // Surface the real cause (e.g. a missing table/column on the DB)
+            // instead of a blank "Server error."
+            return $this->fail('Could not save the connection: ' . class_basename($e) . ' — ' . $e->getMessage(), [], 422);
         }
 
         return $this->ok(['connection' => $this->connectionArray($conn->fresh())]);
