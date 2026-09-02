@@ -158,6 +158,65 @@ class SocialController extends Controller
         return $this->ok(['post' => $this->postArray($post->fresh())]);
     }
 
+    /** Edit the caption. Updates PiziDesk, and the live Facebook post if published. */
+    public function updatePost(Request $request, string $uuid): JsonResponse
+    {
+        $this->authorize('campaigns.create');
+
+        $data = $request->validate([
+            'caption' => ['nullable', 'string', 'max:2200'],
+        ]);
+
+        $post = SocialPost::where('uuid', $uuid)->firstOrFail();
+        $conn = SocialConnection::first();
+
+        $fbId = $post->results['facebook']['id'] ?? null;
+        $igEdited = false;
+
+        if ($conn && $fbId) {
+            try {
+                $this->meta->editFacebookPost($conn->page_access_token, $fbId, (string) ($data['caption'] ?? ''));
+            } catch (\Throwable $e) {
+                return $this->fail('Could not update the Facebook post: ' . $e->getMessage(), [], 422);
+            }
+        }
+        // Note: Instagram does not allow editing a published post's caption via API.
+        $igPublished = ($post->results['instagram']['status'] ?? null) === 'published';
+
+        $post->update(['caption' => $data['caption'] ?? null]);
+
+        return $this->ok([
+            'post' => $this->postArray($post->fresh()),
+            'note' => $igPublished ? 'Caption updated. (Instagram does not allow editing a published post — only Facebook was updated.)' : null,
+        ]);
+    }
+
+    /** Delete a post from PiziDesk, and from Facebook if it was published there. */
+    public function deletePost(Request $request, string $uuid): JsonResponse
+    {
+        $this->authorize('campaigns.create');
+
+        $post = SocialPost::where('uuid', $uuid)->firstOrFail();
+        $conn = SocialConnection::first();
+
+        $fbId = $post->results['facebook']['id'] ?? null;
+        if ($conn && $fbId) {
+            try {
+                $this->meta->deleteFacebookPost($conn->page_access_token, $fbId);
+            } catch (\Throwable $e) {
+                // best-effort — still remove from PiziDesk even if FB delete fails
+            }
+        }
+
+        $igPublished = ($post->results['instagram']['status'] ?? null) === 'published';
+        $post->delete();
+
+        return $this->ok([
+            'message' => 'Post deleted.',
+            'note' => $igPublished ? 'Removed from PiziDesk and Facebook. Instagram posts cannot be deleted via API — remove it from the Instagram app if needed.' : null,
+        ]);
+    }
+
     // ---- publishing core ----
 
     private function publishPost(SocialPost $post, SocialConnection $conn): void

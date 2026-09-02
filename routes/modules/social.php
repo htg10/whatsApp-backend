@@ -11,4 +11,6 @@ Route::prefix('social')->group(function () {
     Route::get('/posts', [SocialController::class, 'posts']);
     Route::post('/posts', [SocialController::class, 'createPost']);
     Route::post('/posts/{uuid}/publish', [SocialController::class, 'publish']);
+    Route::put('/posts/{uuid}', [SocialController::class, 'updatePost']);
+    Route::delete('/posts/{uuid}', [SocialController::class, 'deletePost']);
 });

@@ -139,6 +139,23 @@ class MetaSocialService
         return (string) $publish->json('id');
     }
 
+    /** Best-effort delete of a published Facebook post/video. */
+    public function deleteFacebookPost(string $token, string $postId): void
+    {
+        $res = Http::timeout(30)->delete("{$this->base}/{$postId}", ['access_token' => $token]);
+        $this->guard($res, 'Facebook delete failed');
+    }
+
+    /** Edit the caption/message of a published Facebook post. */
+    public function editFacebookPost(string $token, string $postId, string $message): void
+    {
+        $res = Http::timeout(30)->asForm()->post("{$this->base}/{$postId}", [
+            'message' => $message,
+            'access_token' => $token,
+        ]);
+        $this->guard($res, 'Facebook edit failed');
+    }
+
     /** Turn a Graph API error response into a clean exception message. */
     private function guard(\Illuminate\Http\Client\Response $res, string $context): void
     {
