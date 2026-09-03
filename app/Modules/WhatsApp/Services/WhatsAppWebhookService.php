@@ -150,6 +150,14 @@ class WhatsAppWebhookService extends BaseService
             'message_id' => $message->id,
             'conversation_id' => $conversation->id,
         ]);
+
+        // Chatbot auto-reply (best-effort — never blocks message intake).
+        try {
+            app(\App\Modules\Chatbot\Services\ChatbotEngine::class)
+                ->handleInbound($phone, $contact, $conversation->fresh(), $msgType, $body);
+        } catch (\Throwable $e) {
+            $this->log($event, 'warning', 'chatbot.failed', 'Chatbot auto-reply error: ' . $e->getMessage());
+        }
     }
 
     public function handleStatusUpdate(WebhookEvent $event): void
