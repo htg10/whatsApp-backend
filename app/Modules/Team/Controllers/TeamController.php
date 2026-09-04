@@ -71,6 +71,11 @@ class TeamController extends Controller
             'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
 
+        // Enforce the plan's agent limit (dynamic — read from the plan, not hard-coded).
+        if ($data['role'] === 'agent') {
+            app(\App\Modules\Billing\Services\PlanLimitService::class)->assertCanAddAgent($tenantId);
+        }
+
         $user = User::create([
             'tenant_id' => $tenantId,
             'name' => $data['name'],

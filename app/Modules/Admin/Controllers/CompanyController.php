@@ -3,6 +3,8 @@
 namespace App\Modules\Admin\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Plan;
+use App\Models\Subscription;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Modules\Auth\Actions\RegisterTenantAction;
@@ -27,9 +29,13 @@ class CompanyController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
+        $limits = app(\App\Modules\Billing\Services\PlanLimitService::class);
+
         return $this->ok([
-            'companies' => $tenants->map(function (Tenant $t) {
-                $owner = User::where('tenant_id', $t->id)->orderBy('id')->first();
+            'companies' => $tenants->map(function (Tenant $t) use ($limits) {
+                $owner = \App\Models\User::where('tenant_id', $t->id)->orderBy('id')->first();
+                $plan = $limits->planFor($t->id);
+                $agentLimit = $limits->limit($t->id, 'max_agents');
                 return [
                     'id' => $t->uuid ?? (string) $t->id,
                     'name' => $t->company_name ?? $t->name,
@@ -37,11 +43,45 @@ class CompanyController extends Controller
                     'users_count' => $t->users_count,
                     'owner_name' => $owner?->name,
                     'owner_email' => $owner?->email,
+                    'plan_id' => $plan?->uuid,
+                    'plan_name' => $plan?->name,
+                    'agents_used' => $limits->usage($t->id, 'agents'),
+                    'agents_limit' => $agentLimit, // null = unlimited
                     'trial_ends_at' => $t->trial_ends_at?->toIso8601String(),
                     'created_at' => $t->created_at?->toIso8601String(),
                 ];
             }),
+            'plans' => Plan::where('is_active', true)->orderBy('sort_order')->orderBy('price')
+                ->get()->map(fn (Plan $p) => ['id' => $p->uuid, 'name' => $p->name]),
         ]);
+    }
+
+    /** Set a tenant's plan by pointing its (latest) subscription at the plan. */
+    private function setTenantPlan(int $tenantId, string $planUuid): void
+    {
+        $plan = Plan::where('uuid', $planUuid)->firstOrFail();
+        $sub = Subscription::withoutGlobalScopes()->where('tenant_id', $tenantId)->latest('id')->first();
+        $attrs = [
+            'plan_id' => $plan->id,
+            'status' => 'active',
+            'current_period_start' => now(),
+            'current_period_end' => $plan->billing_period === 'yearly' ? now()->addYear() : now()->addMonth(),
+        ];
+        if ($sub) {
+            $sub->update($attrs);
+        } else {
+            Subscription::create(array_merge($attrs, ['tenant_id' => $tenantId]));
+        }
+    }
+
+    public function assignPlan(Request $request, string $uuid): JsonResponse
+    {
+        $this->ensureSuperAdmin($request);
+        $data = $request->validate(['plan_id' => ['required', 'string', 'exists:plans,uuid']]);
+        $tenant = $this->findTenant($uuid);
+        $this->setTenantPlan($tenant->id, $data['plan_id']);
+
+        return $this->ok(['message' => 'Plan assigned.']);
     }
 
     public function store(Request $request): JsonResponse
@@ -54,6 +94,7 @@ class CompanyController extends Controller
             'owner_email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8'],
             'phone' => ['nullable', 'string', 'max:32'],
+            'plan_id' => ['nullable', 'string', 'exists:plans,uuid'],
         ]);
 
         // Preserve the super admin's auth context — the action logs in as the new
@@ -71,6 +112,10 @@ class CompanyController extends Controller
         auth('api')->setUser($superAdmin);
 
         $tenant = $owner->tenant;
+
+        if (! empty($data['plan_id'])) {
+            $this->setTenantPlan($tenant->id, $data['plan_id']);
+        }
 
         return $this->ok([
             'company' => [
