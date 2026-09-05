@@ -15,6 +15,10 @@ interface WhatsAppProviderInterface
 
     public function getTemplates(string $wabaId): array;
 
+    public function createTemplate(string $wabaId, array $payload): array;
+
+    public function deleteTemplate(string $wabaId, string $name): array;
+
     public function getPhoneNumber(string $phoneNumberId): array;
 
     public function registerPhoneNumber(string $phoneNumberId, string $pin): array;

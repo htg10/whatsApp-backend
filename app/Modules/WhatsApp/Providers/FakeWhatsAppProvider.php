@@ -35,6 +35,18 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
         return ['data' => []];
     }
 
+    public function createTemplate(string $wabaId, array $payload): array
+    {
+        $this->sent[] = compact('wabaId', 'payload');
+        return ['id' => 'template_' . Str::random(12), 'status' => 'PENDING', 'category' => $payload['category'] ?? 'UTILITY'];
+    }
+
+    public function deleteTemplate(string $wabaId, string $name): array
+    {
+        $this->sent[] = ['deleted' => compact('wabaId', 'name')];
+        return ['success' => true];
+    }
+
     public function getPhoneNumber(string $phoneNumberId): array
     {
         return ['id' => $phoneNumberId, 'display_phone_number' => '15550000000', 'quality_rating' => 'GREEN'];

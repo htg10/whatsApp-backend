@@ -2,6 +2,7 @@
 
 namespace App\Modules\WhatsApp\Services;
 
+use App\Models\BlacklistEntry;
 use App\Models\BulkSend;
 use App\Models\BulkSendRecipient;
 use App\Models\WhatsappPhoneNumber;
@@ -27,9 +28,18 @@ class BulkSendService extends BaseService
             ->values()
             ->all();
 
+        // Drop black-listed numbers so opted-out users are never messaged.
+        $blocked = BlacklistEntry::withoutGlobalScopes()
+            ->where('tenant_id', $tenantId)
+            ->pluck('phone')
+            ->all();
+        if (! empty($blocked)) {
+            $numbers = array_values(array_diff($numbers, $blocked));
+        }
+
         if (empty($numbers)) {
             throw \Illuminate\Validation\ValidationException::withMessages([
-                'numbers' => ['No valid phone numbers found after cleaning.'],
+                'numbers' => ['No valid phone numbers left to send (all were invalid or black-listed).'],
             ]);
         }
 

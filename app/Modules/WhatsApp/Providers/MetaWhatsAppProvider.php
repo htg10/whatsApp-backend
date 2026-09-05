@@ -70,6 +70,18 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
             fn (PendingRequest $g) => $g->get("/{$wabaId}/message_templates", ['limit' => 250]));
     }
 
+    public function createTemplate(string $wabaId, array $payload): array
+    {
+        return $this->perform('POST', "/{$wabaId}/message_templates", $payload,
+            fn (PendingRequest $g) => $g->post("/{$wabaId}/message_templates", $payload));
+    }
+
+    public function deleteTemplate(string $wabaId, string $name): array
+    {
+        return $this->perform('DELETE', "/{$wabaId}/message_templates", ['name' => $name],
+            fn (PendingRequest $g) => $g->delete("/{$wabaId}/message_templates", ['name' => $name]));
+    }
+
     public function getPhoneNumber(string $phoneNumberId): array
     {
         $fields = 'id,display_phone_number,verified_name,quality_rating,throughput,code_verification_status,name_status';
