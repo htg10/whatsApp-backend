@@ -10,6 +10,11 @@ use Illuminate\Support\Facades\Hash;
  * Bootstraps a single platform super admin (tenant_id null). Credentials come
  * from env so no secret is committed; falls back to a documented default in
  * local only.
+ *
+ * Password behaviour: when SUPER_ADMIN_PASSWORD is set, it is synced on EVERY
+ * run — so changing .env and re-running the seeder resets the password. When it
+ * is not set, the local default is only applied on first creation (an existing
+ * account's password is never clobbered with the default).
  */
 class SuperAdminSeeder extends Seeder
 {
@@ -25,8 +30,11 @@ class SuperAdminSeeder extends Seeder
             'email_verified_at' => now(),
         ]);
 
-        if (! $admin->exists) {
-            $admin->password = Hash::make(env('SUPER_ADMIN_PASSWORD', 'password'));
+        $password = env('SUPER_ADMIN_PASSWORD');
+        if ($password !== null && $password !== '') {
+            $admin->password = Hash::make($password); // explicit env value → always sync
+        } elseif (! $admin->exists) {
+            $admin->password = Hash::make('password'); // local default, only on first create
         }
 
         $admin->save();
