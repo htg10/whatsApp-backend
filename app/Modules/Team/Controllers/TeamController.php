@@ -96,6 +96,7 @@ class TeamController extends Controller
 
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'password' => ['sometimes', 'nullable', 'string', 'min:8'],
             'role' => ['sometimes', 'required', 'string', Rule::in(['agent'])], // cannot promote to Admin
             'features' => ['nullable', 'array'],
             'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
@@ -103,6 +104,9 @@ class TeamController extends Controller
 
         if (isset($data['name'])) {
             $user->update(['name' => $data['name']]);
+        }
+        if (! empty($data['password'])) {
+            $user->update(['password' => Hash::make($data['password'])]);
         }
         if (isset($data['role']) || array_key_exists('features', $data)) {
             $role = $data['role'] ?? $this->roleKey($user);

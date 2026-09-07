@@ -131,6 +131,39 @@ class CompanyController extends Controller
         ], 201);
     }
 
+    /** All users (owner + agents) of a company — for super-admin management. */
+    public function users(Request $request, string $uuid): JsonResponse
+    {
+        $this->ensureSuperAdmin($request);
+        $tenant = $this->findTenant($uuid);
+
+        $users = User::where('tenant_id', $tenant->id)->orderBy('id')->get();
+
+        return $this->ok([
+            'users' => $users->map(fn (User $u) => [
+                'id' => $u->uuid,
+                'name' => $u->name,
+                'email' => $u->email,
+                'status' => $u->status,
+                'role' => $u->hasRole('tenant-owner') ? 'Admin' : 'Agent',
+            ]),
+        ]);
+    }
+
+    /** Super admin resets any company user's (Admin or Agent) password. */
+    public function resetUserPassword(Request $request, string $uuid, string $userUuid): JsonResponse
+    {
+        $this->ensureSuperAdmin($request);
+        $tenant = $this->findTenant($uuid);
+
+        $data = $request->validate(['password' => ['required', 'string', 'min:8']]);
+
+        $user = User::where('uuid', $userUuid)->where('tenant_id', $tenant->id)->firstOrFail();
+        $user->update(['password' => \Illuminate\Support\Facades\Hash::make($data['password'])]);
+
+        return $this->ok(['message' => "Password updated for {$user->name}."]);
+    }
+
     public function toggle(Request $request, string $uuid): JsonResponse
     {
         $this->ensureSuperAdmin($request);

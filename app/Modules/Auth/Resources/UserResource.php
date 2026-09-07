@@ -24,6 +24,11 @@ class UserResource extends JsonResource
             'email_verified' => $this->email_verified_at !== null,
             'roles' => $this->getRoleNames(),
             'permissions' => $this->getAllPermissions()->pluck('name'),
+            // Enabled plan feature keys (social/chatbot/automations/reports/...).
+            // null = no plan / super admin → no feature gating (all available).
+            'plan_features' => (! $this->is_super_admin && $this->tenant_id)
+                ? app(\App\Modules\Billing\Services\PlanLimitService::class)->planFeatures($this->tenant_id)
+                : null,
             'tenant' => new TenantResource($this->whenLoaded('tenant')),
             'last_login_at' => $this->last_login_at?->toIso8601String(),
         ];

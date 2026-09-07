@@ -11,6 +11,8 @@ Route::prefix('admin')->group(function () {
     Route::post('/companies', [CompanyController::class, 'store']);
     Route::post('/companies/{uuid}/toggle', [CompanyController::class, 'toggle']);
     Route::post('/companies/{uuid}/plan', [CompanyController::class, 'assignPlan']);
+    Route::get('/companies/{uuid}/users', [CompanyController::class, 'users']);
+    Route::post('/companies/{uuid}/users/{userUuid}/reset-password', [CompanyController::class, 'resetUserPassword']);
     Route::delete('/companies/{uuid}', [CompanyController::class, 'destroy']);
 
     Route::get('/plans', [PlanController::class, 'index']);
