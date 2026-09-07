@@ -49,8 +49,8 @@ class TeamController extends Controller
 
         return $this->ok([
             'members' => $users->map(fn (User $u) => $this->memberArray($u)),
+            // A company owner may only create Agents — never another Admin.
             'roles' => [
-                ['value' => 'admin', 'label' => 'Admin'],
                 ['value' => 'agent', 'label' => 'Agent'],
             ],
             'features' => collect(self::FEATURES)->map(fn ($f, $key) => ['key' => $key, 'label' => $f['label']])->values(),
@@ -66,15 +66,13 @@ class TeamController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users')->where(fn ($q) => $q->where('tenant_id', $tenantId))],
             'password' => ['required', 'string', 'min:8'],
-            'role' => ['required', 'string', Rule::in(['admin', 'agent'])],
+            'role' => ['required', 'string', Rule::in(['agent'])], // owners create Agents only
             'features' => ['nullable', 'array'],
             'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
 
         // Enforce the plan's agent limit (dynamic — read from the plan, not hard-coded).
-        if ($data['role'] === 'agent') {
-            app(\App\Modules\Billing\Services\PlanLimitService::class)->assertCanAddAgent($tenantId);
-        }
+        app(\App\Modules\Billing\Services\PlanLimitService::class)->assertCanAddAgent($tenantId);
 
         $user = User::create([
             'tenant_id' => $tenantId,
@@ -98,7 +96,7 @@ class TeamController extends Controller
 
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'role' => ['sometimes', 'required', 'string', Rule::in(['admin', 'agent'])],
+            'role' => ['sometimes', 'required', 'string', Rule::in(['agent'])], // cannot promote to Admin
             'features' => ['nullable', 'array'],
             'features.*' => ['string', Rule::in(array_keys(self::FEATURES))],
         ]);
