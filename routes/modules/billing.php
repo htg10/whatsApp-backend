@@ -9,4 +9,6 @@ Route::prefix('billing')->group(function () {
     Route::get('/wallet', [BillingController::class, 'wallet']);
     Route::get('/invoices', [BillingController::class, 'invoices']);
     Route::post('/subscribe', [BillingController::class, 'subscribe']);
+    Route::post('/order', [BillingController::class, 'createOrder']);
+    Route::post('/verify', [BillingController::class, 'verifyPayment']);
 });

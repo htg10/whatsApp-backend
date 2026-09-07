@@ -115,30 +115,111 @@ class BillingController extends Controller
         ]);
 
         $plan = Plan::where('uuid', $data['plan_id'])->where('is_active', true)->firstOrFail();
-        $tenantId = $request->user()->tenant_id;
+        $subscription = $this->applyPlan($plan, $request->user()->tenant_id);
 
-        $subscription = Subscription::latest('id')->first();
+        return $this->ok(['subscription' => $this->subscriptionArray($subscription)]);
+    }
 
+    /**
+     * Start a checkout. Free plans are assigned immediately. Paid plans create a
+     * Razorpay order and return the details the frontend needs to open checkout.
+     */
+    public function createOrder(Request $request): JsonResponse
+    {
+        $this->authorize('billing.manage');
+
+        $data = $request->validate([
+            'plan_id' => ['required', 'string', 'exists:plans,uuid'],
+        ]);
+
+        $plan = Plan::where('uuid', $data['plan_id'])->where('is_active', true)->firstOrFail();
+
+        // Free plan — no payment needed, assign right away.
+        if ($plan->price <= 0) {
+            $subscription = $this->applyPlan($plan, $request->user()->tenant_id);
+            return $this->ok(['free' => true, 'subscription' => $this->subscriptionArray($subscription)]);
+        }
+
+        $key = config('services.razorpay.key');
+        $secret = config('services.razorpay.secret');
+        if (! $key || ! $secret) {
+            return $this->fail('Online payments are not configured. Please contact support.', [], 503);
+        }
+
+        $amount = (int) round($plan->price * 100); // paise
+        $response = \Illuminate\Support\Facades\Http::withBasicAuth($key, $secret)
+            ->acceptJson()
+            ->post('https://api.razorpay.com/v1/orders', [
+                'amount' => $amount,
+                'currency' => $plan->currency ?: 'INR',
+                'receipt' => 'plan_' . $plan->uuid . '_' . now()->timestamp,
+                'notes' => ['plan' => $plan->name, 'tenant_id' => (string) $request->user()->tenant_id],
+            ]);
+
+        if ($response->failed()) {
+            $msg = data_get($response->json(), 'error.description', 'Could not create the payment order.');
+            return $this->fail('Razorpay: ' . $msg, [], 502);
+        }
+
+        return $this->ok([
+            'free' => false,
+            'order_id' => $response->json('id'),
+            'amount' => $amount,
+            'currency' => $plan->currency ?: 'INR',
+            'key_id' => $key,
+            'plan' => $this->planArray($plan),
+        ]);
+    }
+
+    /**
+     * Verify a completed Razorpay payment and, on success, assign the plan to the
+     * tenant. Signature = HMAC-SHA256(order_id|payment_id, secret).
+     */
+    public function verifyPayment(Request $request): JsonResponse
+    {
+        $this->authorize('billing.manage');
+
+        $data = $request->validate([
+            'plan_id' => ['required', 'string', 'exists:plans,uuid'],
+            'razorpay_order_id' => ['required', 'string'],
+            'razorpay_payment_id' => ['required', 'string'],
+            'razorpay_signature' => ['required', 'string'],
+        ]);
+
+        $secret = config('services.razorpay.secret');
+        $expected = hash_hmac('sha256', $data['razorpay_order_id'] . '|' . $data['razorpay_payment_id'], (string) $secret);
+
+        if (! hash_equals($expected, $data['razorpay_signature'])) {
+            return $this->fail('Payment verification failed. If money was deducted it will be refunded automatically.', [], 422);
+        }
+
+        $plan = Plan::where('uuid', $data['plan_id'])->where('is_active', true)->firstOrFail();
+        $subscription = $this->applyPlan($plan, $request->user()->tenant_id);
+
+        return $this->ok([
+            'message' => 'Payment successful — your plan is now active.',
+            'subscription' => $this->subscriptionArray($subscription),
+        ]);
+    }
+
+    /** Create or update the tenant's subscription to point at the given plan. */
+    private function applyPlan(Plan $plan, int $tenantId): Subscription
+    {
         $attributes = [
             'plan_id' => $plan->id,
-            'status' => $plan->price > 0 ? 'active' : 'active',
+            'status' => 'active',
             'current_period_start' => now(),
             'current_period_end' => $plan->billing_period === 'yearly' ? now()->addYear() : now()->addMonth(),
         ];
 
+        $subscription = Subscription::latest('id')->first();
         if ($subscription) {
             $subscription->update($attributes);
         } else {
-            $subscription = Subscription::create(array_merge($attributes, [
-                'tenant_id' => $tenantId,
-            ]));
+            $subscription = Subscription::create(array_merge($attributes, ['tenant_id' => $tenantId]));
         }
 
-        $subscription->load('plan');
-
-        return $this->ok([
-            'subscription' => $this->subscriptionArray($subscription),
-        ]);
+        return $subscription->load('plan');
     }
 
     // ---- helpers ----
