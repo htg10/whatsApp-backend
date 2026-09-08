@@ -23,7 +23,14 @@ class TeamController extends Controller
     private const ADMIN_ROLE = 'tenant-owner';
     private const AGENT_ROLE = 'agent';
 
-    /** Feature catalog the admin ticks for an agent. key => [label, permissions]. */
+    /**
+     * Feature catalog the admin ticks for an agent. key => [label, permissions].
+     *
+     * These are the day-to-day, customer-facing tools an agent may be given.
+     * OWNER-ONLY tools are deliberately excluded so an agent can never be granted
+     * them: WhatsApp number setup (tokens/registration), managing other agents,
+     * the team, and billing all stay with the Admin (owner).
+     */
     private const FEATURES = [
         'inbox'       => ['label' => 'Inbox (chats)',   'perms' => ['conversations.view', 'conversations.reply', 'conversations.note', 'conversations.tag', 'conversations.status']],
         'contacts'    => ['label' => 'Contacts',        'perms' => ['contacts.view', 'contacts.create', 'contacts.update']],
@@ -31,11 +38,8 @@ class TeamController extends Controller
         'social'      => ['label' => 'Social',          'perms' => ['campaigns.view', 'campaigns.create']],
         'automations' => ['label' => 'Automations',     'perms' => ['workflows.view', 'workflows.create']],
         'chatbot'     => ['label' => 'Chatbot',         'perms' => ['bots.view', 'bots.create']],
-        'agents'      => ['label' => 'Agents',          'perms' => ['agents.view']],
-        'templates'   => ['label' => 'Templates',       'perms' => ['templates.view']],
+        'templates'   => ['label' => 'Templates (view)', 'perms' => ['templates.view']],
         'analytics'   => ['label' => 'Analytics',       'perms' => ['analytics.view']],
-        'whatsapp'    => ['label' => 'WhatsApp setup',  'perms' => ['whatsapp.view']],
-        'billing'     => ['label' => 'Billing',         'perms' => ['billing.view']],
     ];
 
     public function index(Request $request): JsonResponse
