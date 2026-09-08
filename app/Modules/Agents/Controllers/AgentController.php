@@ -80,9 +80,30 @@ class AgentController extends Controller
         ]);
     }
 
+    /** Lightweight roster (id + name) any inbox user can read, for the transfer picker. */
+    public function assignable(Request $request): JsonResponse
+    {
+        $this->authorize('conversations.view');
+
+        $users = User::query()
+            ->where('tenant_id', $request->user()->tenant_id)
+            ->where('status', 'active')
+            ->orderBy('name')
+            ->get(['id', 'uuid', 'name']);
+
+        return $this->ok([
+            'agents' => $users->map(fn (User $u) => [
+                'id' => $u->uuid,
+                'name' => $u->name,
+                'is_me' => $u->id === $request->user()->id,
+            ])->values(),
+        ]);
+    }
+
     public function assign(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.manage');
+        // Any inbox user may transfer a chat to a teammate (not just the owner).
+        $this->authorize('conversations.assign');
 
         $data = $request->validate([
             'conversation_id' => ['required', 'string', 'exists:conversations,uuid'],
@@ -117,7 +138,7 @@ class AgentController extends Controller
 
     public function unassign(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.manage');
+        $this->authorize('conversations.assign');
 
         $data = $request->validate([
             'conversation_id' => ['required', 'string', 'exists:conversations,uuid'],

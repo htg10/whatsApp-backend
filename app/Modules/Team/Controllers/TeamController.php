@@ -32,7 +32,7 @@ class TeamController extends Controller
      * the team, and billing all stay with the Admin (owner).
      */
     private const FEATURES = [
-        'inbox'       => ['label' => 'Inbox (chats)',   'perms' => ['conversations.view', 'conversations.reply', 'conversations.note', 'conversations.tag', 'conversations.status']],
+        'inbox'       => ['label' => 'Inbox (chats)',   'perms' => ['conversations.view', 'conversations.reply', 'conversations.note', 'conversations.tag', 'conversations.status', 'conversations.assign']],
         'contacts'    => ['label' => 'Contacts',        'perms' => ['contacts.view', 'contacts.create', 'contacts.update']],
         'campaigns'   => ['label' => 'Campaigns',       'perms' => ['campaigns.view', 'campaigns.create']],
         'social'      => ['label' => 'Social',          'perms' => ['campaigns.view', 'campaigns.create']],
