@@ -82,9 +82,14 @@ class BulkSendService extends BaseService
                 ]);
                 $sentCount++;
             } catch (\Throwable $e) {
+                // Prefer the user-friendly, actionable message (e.g. token expired)
+                // over Meta's raw technical text ("Authentication Error").
+                $msg = $e instanceof \App\Modules\WhatsApp\Exceptions\WhatsAppApiException
+                    ? $e->userMessage
+                    : $e->getMessage();
                 $recipient->update([
                     'status' => 'failed',
-                    'error_message' => Str::limit($e->getMessage(), 500),
+                    'error_message' => Str::limit($msg, 500),
                 ]);
                 $failedCount++;
             }
