@@ -94,9 +94,21 @@ class CampaignController extends Controller
 
         $tenantId = $request->user()->tenant_id;
 
-        $template = \App\Models\Template::where('uuid', $data['template_id'])->firstOrFail();
+        $template = \App\Models\Template::where('uuid', $data['template_id'])->first();
+        if (! $template) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'template_id' => ['That template could not be found. Sync your templates and try again.'],
+            ]);
+        }
 
-        $phone = WhatsappPhoneNumber::where('is_default', true)->firstOrFail();
+        // Prefer the default number; fall back to any active number.
+        $phone = WhatsappPhoneNumber::where('is_default', true)->first()
+            ?? WhatsappPhoneNumber::whereIn('status', ['connected', 'registered'])->first();
+        if (! $phone) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'template_id' => ['No active WhatsApp number found. Please connect and register a WhatsApp number on the WhatsApp page before creating a campaign.'],
+            ]);
+        }
 
         $status = isset($data['scheduled_at']) ? 'scheduled' : 'draft';
 

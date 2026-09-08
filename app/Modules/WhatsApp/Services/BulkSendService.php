@@ -15,11 +15,18 @@ class BulkSendService extends BaseService
 
     public function send(int $tenantId, int $userId, array $numbers, string $template, string $language, array $components = []): BulkSend
     {
+        // Prefer the default active number; fall back to ANY active number.
         $phone = WhatsappPhoneNumber::withoutGlobalScopes()
             ->where('tenant_id', $tenantId)
-            ->where('is_default', true)
             ->whereIn('status', ['connected', 'registered'])
-            ->firstOrFail();
+            ->orderByDesc('is_default')
+            ->first();
+
+        if (! $phone) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'template' => ['No active WhatsApp number found. Please connect and register a WhatsApp number on the WhatsApp page before sending.'],
+            ]);
+        }
 
         $numbers = collect($numbers)
             ->map(fn ($n) => preg_replace('/\D/', '', $n))
