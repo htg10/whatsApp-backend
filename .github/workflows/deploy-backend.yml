@@ -1,0 +1,62 @@
+name: Deploy backend to Hostinger
+
+# Every push to main: upload the Laravel source over FTP (upload-only — never
+# deletes, so vendor/, .env and storage/ on the server are untouched), then call
+# the key-guarded deploy hook to clear stale caches and run migrations.
+#
+# No composer step is needed: new classes under app/ resolve via PSR-4 at
+# runtime, and migrations are discovered from database/migrations.
+#
+# Required repo secrets:
+#   FTP_SERVER, FTP_USERNAME, FTP_PASSWORD  — Hostinger FTP account
+#   BACKEND_FTP_DIR                         — server path of the Laravel app root
+#   BACKEND_URL                             — e.g. https://main.heltog.com
+#   DEPLOY_KEY                              — same value as DEPLOY_KEY in server .env
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload source via FTP (upload-only; skips vendor/.env/storage)
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          BACKEND_FTP_DIR: ${{ secrets.BACKEND_FTP_DIR }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y lftp
+          lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" <<EOF
+          set ftp:ssl-allow true
+          set ftp:ssl-force true
+          set ftp:ssl-protect-data true
+          set ssl:verify-certificate no
+          set net:max-retries 5
+          set net:timeout 30
+          set mirror:parallel-transfer-count 1
+          mirror -R --verbose \
+            --exclude-glob .git* \
+            --exclude vendor/ \
+            --exclude node_modules/ \
+            --exclude storage/ \
+            --exclude tests/ \
+            --exclude .env \
+            ./ "$BACKEND_FTP_DIR"
+          bye
+          EOF
+
+      - name: Run migrations + clear caches (deploy hook)
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          echo "Calling deploy hook…"
+          code=$(curl -s -o /tmp/deploy.json -w "%{http_code}" "$BACKEND_URL/api/v1/system/deploy?key=$DEPLOY_KEY")
+          echo "HTTP $code"; cat /tmp/deploy.json; echo
+          [ "$code" = "200" ] || { echo "Deploy hook failed"; exit 1; }
