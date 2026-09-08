@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Auth\Controllers\AuthController;
+use App\Modules\Auth\Controllers\GoogleAuthController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -15,6 +16,10 @@ Route::prefix('auth')->group(function () {
         Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
         Route::post('/reset-password', [AuthController::class, 'resetPassword']);
     });
+
+    // Google OAuth (browser redirect flow — public, no auth:api).
+    Route::get('/google/redirect', [GoogleAuthController::class, 'redirect']);
+    Route::get('/google/callback', [GoogleAuthController::class, 'callback']);
 
     Route::middleware('auth:api')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);

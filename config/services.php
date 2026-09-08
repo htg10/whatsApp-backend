@@ -28,4 +28,15 @@ return [
         'secret'         => env('RAZORPAY_SECRET'),
         'webhook_secret' => env('RAZORPAY_WEBHOOK_SECRET'),
     ],
+
+    'google' => [
+        'client_id'     => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        // Where Google sends the user back — must exactly match the "Authorized
+        // redirect URI" in the Google Cloud console, e.g.
+        // https://main.heltog.com/api/v1/auth/google/callback
+        'redirect'      => env('GOOGLE_REDIRECT_URI'),
+        // Where we send the user after issuing a token (the frontend app).
+        'frontend_url'  => env('FRONTEND_URL', 'https://frontend.heltog.com'),
+    ],
 ];

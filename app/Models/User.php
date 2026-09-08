@@ -31,10 +31,11 @@ class User extends Authenticatable implements JWTSubject
         'tenant_id', 'name', 'email', 'password', 'phone',
         'avatar_url', 'is_super_admin', 'status', 'timezone',
         'email_verified_at', 'last_login_at',
+        'google_id', 'google_refresh_token',
     ];
 
     protected $hidden = [
-        'password', 'remember_token',
+        'password', 'remember_token', 'google_refresh_token',
         'two_factor_secret', 'two_factor_recovery_codes',
     ];
 
