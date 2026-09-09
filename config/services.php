@@ -29,11 +29,23 @@ return [
         'webhook_secret' => env('RAZORPAY_WEBHOOK_SECRET'),
     ],
 
+    // AI chatbot provider. 'gemini' | 'anthropic'. When unset, auto-detects:
+    // Gemini if GEMINI_API_KEY is present, else Anthropic if ANTHROPIC_API_KEY is.
+    'ai' => [
+        'provider' => env('AI_PROVIDER'),
+    ],
+
     'anthropic' => [
         'key'   => env('ANTHROPIC_API_KEY'),
         // Default to Anthropic's most capable model; override per deployment.
         // For a high-volume WhatsApp chatbot, claude-haiku-4-5 is cheaper/faster.
         'model' => env('ANTHROPIC_MODEL', 'claude-opus-5'),
+    ],
+
+    'gemini' => [
+        'key'   => env('GEMINI_API_KEY'),
+        // Fast, low-cost default; override with GEMINI_MODEL (e.g. gemini-1.5-flash).
+        'model' => env('GEMINI_MODEL', 'gemini-2.0-flash'),
     ],
 
     'google' => [

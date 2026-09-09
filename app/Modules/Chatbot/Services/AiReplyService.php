@@ -10,41 +10,96 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Generates an AI reply for a chatbot using the business's own instructions as
- * context. Talks to the Anthropic Messages API over HTTP (same pattern as the
- * app's other integrations). Returns null when AI is unavailable/misconfigured
- * so the caller can fall back gracefully.
+ * context. Supports two providers over plain HTTP (same pattern as the app's
+ * other integrations): Google Gemini and Anthropic Claude. Returns null when AI
+ * is unavailable/misconfigured so the caller can fall back gracefully.
  */
 class AiReplyService
 {
-    private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
+    private const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
+    private const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
     private const HISTORY_LIMIT = 10;
 
     public function generate(Chatbot $chatbot, Conversation $conversation, string $incoming): ?string
     {
-        $key = config('services.anthropic.key');
-        if (! $key) {
-            return null; // no API key configured — skip AI, let caller use fallback
+        $provider = $this->resolveProvider();
+        if ($provider === null) {
+            return null; // no AI key configured — skip AI, let caller use fallback
         }
 
         $system = $this->systemPrompt($chatbot);
         $messages = $this->history($conversation, $incoming);
 
         try {
-            $res = Http::withHeaders([
-                'x-api-key' => $key,
-                'anthropic-version' => '2023-06-01',
-                'content-type' => 'application/json',
-            ])->timeout(30)->post(self::ENDPOINT, [
-                'model' => config('services.anthropic.model', 'claude-opus-5'),
-                'max_tokens' => 600,
-                'system' => $system,
-                'output_config' => ['effort' => 'low'], // quick, chat-style replies
-                'messages' => $messages,
-            ]);
+            return $provider === 'gemini'
+                ? $this->callGemini($system, $messages)
+                : $this->callAnthropic($system, $messages);
         } catch (\Throwable $e) {
             Log::warning('AI reply request failed: ' . $e->getMessage());
             return null;
         }
+    }
+
+    /** Which provider to use: explicit config, else auto-detect by available key. */
+    private function resolveProvider(): ?string
+    {
+        $pref = config('services.ai.provider');
+        if ($pref === 'gemini' && config('services.gemini.key')) {
+            return 'gemini';
+        }
+        if ($pref === 'anthropic' && config('services.anthropic.key')) {
+            return 'anthropic';
+        }
+        if (config('services.gemini.key')) {
+            return 'gemini';
+        }
+        if (config('services.anthropic.key')) {
+            return 'anthropic';
+        }
+        return null;
+    }
+
+    /** @param array<int, array{role:string, content:string}> $messages */
+    private function callGemini(string $system, array $messages): ?string
+    {
+        $model = config('services.gemini.model', 'gemini-2.0-flash');
+        $contents = array_map(fn ($m) => [
+            'role' => $m['role'] === 'assistant' ? 'model' : 'user',
+            'parts' => [['text' => $m['content']]],
+        ], $messages);
+
+        $res = Http::withHeaders(['x-goog-api-key' => config('services.gemini.key')])
+            ->timeout(30)
+            ->post(self::GEMINI_ENDPOINT . $model . ':generateContent', [
+                'system_instruction' => ['parts' => [['text' => $system]]],
+                'contents' => $contents,
+                'generationConfig' => ['maxOutputTokens' => 600, 'temperature' => 0.7],
+            ]);
+
+        if ($res->failed()) {
+            Log::warning('Gemini reply API error', ['status' => $res->status(), 'body' => $res->json('error.message')]);
+            return null;
+        }
+
+        $text = $res->json('candidates.0.content.parts.0.text');
+
+        return $text ? trim($text) : null;
+    }
+
+    /** @param array<int, array{role:string, content:string}> $messages */
+    private function callAnthropic(string $system, array $messages): ?string
+    {
+        $res = Http::withHeaders([
+            'x-api-key' => config('services.anthropic.key'),
+            'anthropic-version' => '2023-06-01',
+            'content-type' => 'application/json',
+        ])->timeout(30)->post(self::ANTHROPIC_ENDPOINT, [
+            'model' => config('services.anthropic.model', 'claude-opus-5'),
+            'max_tokens' => 600,
+            'system' => $system,
+            'output_config' => ['effort' => 'low'], // quick, chat-style replies
+            'messages' => $messages,
+        ]);
 
         if ($res->failed()) {
             Log::warning('AI reply API error', ['status' => $res->status(), 'body' => $res->json('error.message')]);
