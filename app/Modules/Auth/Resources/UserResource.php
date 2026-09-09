@@ -29,6 +29,11 @@ class UserResource extends JsonResource
             'plan_features' => (! $this->is_super_admin && $this->tenant_id)
                 ? app(\App\Modules\Billing\Services\PlanLimitService::class)->planFeatures($this->tenant_id)
                 : null,
+            // Numeric plan limits (key => int, or null = unlimited). 0 = blocked.
+            // null map for super admin / no tenant → no limit gating.
+            'plan_limits' => (! $this->is_super_admin && $this->tenant_id)
+                ? app(\App\Modules\Billing\Services\PlanLimitService::class)->limitsMap($this->tenant_id)
+                : null,
             'tenant' => new TenantResource($this->whenLoaded('tenant')),
             'last_login_at' => $this->last_login_at?->toIso8601String(),
         ];

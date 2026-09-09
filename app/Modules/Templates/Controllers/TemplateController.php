@@ -84,6 +84,7 @@ class TemplateController extends Controller
         ]);
 
         $tenantId = $request->user()->tenant_id;
+        app(\App\Modules\Billing\Services\PlanLimitService::class)->assertWithinLimit($tenantId, 'max_templates', 'templates', 'templates');
 
         $waba = WhatsappBusinessAccount::where('tenant_id', $tenantId)
             ->when($data['waba_id'] ?? null, fn ($q, $id) => $q->where('uuid', $id)->orWhere('waba_id', $id))

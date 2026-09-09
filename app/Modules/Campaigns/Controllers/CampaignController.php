@@ -93,6 +93,7 @@ class CampaignController extends Controller
         ]);
 
         $tenantId = $request->user()->tenant_id;
+        app(\App\Modules\Billing\Services\PlanLimitService::class)->assertWithinLimit($tenantId, 'max_campaigns', 'campaigns', 'campaigns');
 
         $template = \App\Models\Template::where('uuid', $data['template_id'])->first();
         if (! $template) {

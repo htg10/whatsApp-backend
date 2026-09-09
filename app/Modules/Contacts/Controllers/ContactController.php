@@ -80,6 +80,7 @@ class ContactController extends Controller
         ]);
 
         $tenantId = $request->user()->tenant_id;
+        app(\App\Modules\Billing\Services\PlanLimitService::class)->assertWithinLimit($tenantId, 'max_contacts', 'contacts', 'contacts');
         $waId = preg_replace('/\D/', '', $data['phone']);
 
         $contact = Contact::create([
@@ -154,6 +155,7 @@ class ContactController extends Controller
         ]);
 
         $tenantId = $request->user()->tenant_id;
+        app(\App\Modules\Billing\Services\PlanLimitService::class)->assertWithinLimit($tenantId, 'max_contacts', 'contacts', 'contacts');
         $created = 0;
         $updated = 0;
         $skipped = 0;

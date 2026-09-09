@@ -66,6 +66,8 @@ class ChatbotController extends Controller
             'ai_instructions' => ['nullable', 'string', 'max:8000'],
         ]);
 
+        app(\App\Modules\Billing\Services\PlanLimitService::class)->assertWithinLimit($request->user()->tenant_id, 'max_chatbots', 'chatbots', 'chatbots');
+
         $chatbot = Chatbot::create([
             'tenant_id' => $request->user()->tenant_id,
             'name' => $data['name'],

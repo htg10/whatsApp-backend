@@ -2,10 +2,12 @@
 
 namespace App\Modules\Billing\Services;
 
-use App\Models\Contact;
 use App\Models\Campaign;
+use App\Models\Chatbot;
+use App\Models\Contact;
 use App\Models\Plan;
 use App\Models\Subscription;
+use App\Models\Template;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
@@ -62,8 +64,43 @@ class PlanLimitService
                 ->count(),
             'contacts' => Contact::withoutGlobalScopes()->where('tenant_id', $tenantId)->count(),
             'campaigns' => Campaign::withoutGlobalScopes()->where('tenant_id', $tenantId)->count(),
+            'chatbots' => Chatbot::withoutGlobalScopes()->where('tenant_id', $tenantId)->count(),
+            'templates' => Template::withoutGlobalScopes()->where('tenant_id', $tenantId)->count(),
             default => 0,
         };
+    }
+
+    /** The standard limit keys as a map (value: int limit, or null = unlimited). */
+    public function limitsMap(int $tenantId): array
+    {
+        $keys = ['max_agents', 'max_contacts', 'max_campaigns', 'max_chatbots', 'max_templates'];
+        $out = [];
+        foreach ($keys as $k) {
+            $out[$k] = $this->limit($tenantId, $k); // null = unlimited, else int (0 = blocked)
+        }
+        return $out;
+    }
+
+    /**
+     * Throw a friendly error when the tenant can't add/use a metered feature:
+     * limit 0 = plan doesn't include it at all; used >= limit = quota reached.
+     */
+    public function assertWithinLimit(int $tenantId, string $limitKey, string $usageKey, string $noun): void
+    {
+        $limit = $this->limit($tenantId, $limitKey);
+        if ($limit === null) {
+            return; // unlimited
+        }
+        if ($limit === 0) {
+            throw ValidationException::withMessages([
+                'plan' => ["Your current plan does not include {$noun}. Please upgrade your plan to use this feature."],
+            ]);
+        }
+        if ($this->usage($tenantId, $usageKey) >= $limit) {
+            throw ValidationException::withMessages([
+                'plan' => ["Your current plan allows a maximum of {$limit} {$noun}. Please upgrade your plan to add more."],
+            ]);
+        }
     }
 
     /**
@@ -84,16 +121,7 @@ class PlanLimitService
     /** Throw a friendly validation error if the tenant is at its agent limit. */
     public function assertCanAddAgent(int $tenantId): void
     {
-        $limit = $this->limit($tenantId, 'max_agents');
-        if ($limit === null) {
-            return; // unlimited
-        }
-        $used = $this->usage($tenantId, 'agents');
-        if ($used >= $limit) {
-            throw ValidationException::withMessages([
-                'plan' => ["Your current plan allows a maximum of {$limit} agents. Please upgrade your plan to create more agents."],
-            ]);
-        }
+        $this->assertWithinLimit($tenantId, 'max_agents', 'agents', 'agents');
     }
 
     /**
