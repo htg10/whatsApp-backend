@@ -4,6 +4,7 @@ namespace App\Modules\Billing\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Invoice;
+use App\Models\InvoiceSetting;
 use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\Wallet;
@@ -48,6 +49,7 @@ class BillingController extends Controller
 
         return $this->ok([
             'plans' => $plans->map(fn (Plan $p) => $this->planArray($p)),
+            'gst_rate' => (int) InvoiceSetting::current()->gst_rate,
         ]);
     }
 
@@ -83,16 +85,7 @@ class BillingController extends Controller
             ->paginate($request->integer('per_page', 25));
 
         return $this->ok([
-            'invoices' => $invoices->getCollection()->map(fn (Invoice $inv) => [
-                'id' => $inv->uuid,
-                'number' => $inv->number,
-                'status' => $inv->status,
-                'total' => $this->money($inv->total_minor),
-                'currency' => $inv->currency,
-                'issued_at' => $inv->issued_at?->toIso8601String(),
-                'paid_at' => $inv->paid_at?->toIso8601String(),
-                'due_at' => $inv->due_at?->toIso8601String(),
-            ]),
+            'invoices' => $invoices->getCollection()->map(fn (Invoice $inv) => $this->invoiceArray($inv)),
             'meta' => [
                 'current_page' => $invoices->currentPage(),
                 'last_page' => $invoices->lastPage(),
@@ -128,16 +121,23 @@ class BillingController extends Controller
     {
         $this->authorize('billing.manage');
 
-        $data = $request->validate([
-            'plan_id' => ['required', 'string', 'exists:plans,uuid'],
-        ]);
+        $data = $request->validate(array_merge(
+            ['plan_id' => ['required', 'string', 'exists:plans,uuid']],
+            $this->billingRules(),
+        ));
 
         $plan = Plan::where('uuid', $data['plan_id'])->where('is_active', true)->firstOrFail();
+        [$base, $rate, $tax, $total] = $this->amounts($plan);
 
-        // Free plan — no payment needed, assign right away.
-        if ($plan->price <= 0) {
+        // Free plan — no payment needed, assign and invoice (₹0) right away.
+        if ($total <= 0) {
             $subscription = $this->applyPlan($plan, $request->user()->tenant_id);
-            return $this->ok(['free' => true, 'subscription' => $this->subscriptionArray($subscription)]);
+            $invoice = $this->generateInvoice($subscription, $plan, $data['billing'], $base, $rate, $tax, $total, 'free', null);
+            return $this->ok([
+                'free' => true,
+                'subscription' => $this->subscriptionArray($subscription),
+                'invoice' => $this->invoiceArray($invoice),
+            ]);
         }
 
         $key = config('services.razorpay.key');
@@ -146,11 +146,10 @@ class BillingController extends Controller
             return $this->fail('Online payments are not configured. Please contact support.', [], 503);
         }
 
-        $amount = (int) round($plan->price * 100); // paise
         $response = \Illuminate\Support\Facades\Http::withBasicAuth($key, $secret)
             ->acceptJson()
             ->post('https://api.razorpay.com/v1/orders', [
-                'amount' => $amount,
+                'amount' => $total, // paise, incl GST
                 'currency' => $plan->currency ?: 'INR',
                 'receipt' => 'plan_' . $plan->uuid . '_' . now()->timestamp,
                 'notes' => ['plan' => $plan->name, 'tenant_id' => (string) $request->user()->tenant_id],
@@ -164,7 +163,10 @@ class BillingController extends Controller
         return $this->ok([
             'free' => false,
             'order_id' => $response->json('id'),
-            'amount' => $amount,
+            'amount' => $total,
+            'subtotal' => $base,
+            'tax' => $tax,
+            'gst_rate' => $rate,
             'currency' => $plan->currency ?: 'INR',
             'key_id' => $key,
             'plan' => $this->planArray($plan),
@@ -179,12 +181,12 @@ class BillingController extends Controller
     {
         $this->authorize('billing.manage');
 
-        $data = $request->validate([
+        $data = $request->validate(array_merge([
             'plan_id' => ['required', 'string', 'exists:plans,uuid'],
             'razorpay_order_id' => ['required', 'string'],
             'razorpay_payment_id' => ['required', 'string'],
             'razorpay_signature' => ['required', 'string'],
-        ]);
+        ], $this->billingRules()));
 
         $secret = config('services.razorpay.secret');
         $expected = hash_hmac('sha256', $data['razorpay_order_id'] . '|' . $data['razorpay_payment_id'], (string) $secret);
@@ -194,12 +196,86 @@ class BillingController extends Controller
         }
 
         $plan = Plan::where('uuid', $data['plan_id'])->where('is_active', true)->firstOrFail();
+        [$base, $rate, $tax, $total] = $this->amounts($plan);
         $subscription = $this->applyPlan($plan, $request->user()->tenant_id);
+        $invoice = $this->generateInvoice($subscription, $plan, $data['billing'], $base, $rate, $tax, $total, 'paid', $data['razorpay_payment_id']);
 
         return $this->ok([
             'message' => 'Payment successful — your plan is now active.',
             'subscription' => $this->subscriptionArray($subscription),
+            'invoice' => $this->invoiceArray($invoice),
         ]);
+    }
+
+    /** Validation rules for the customer billing details block. */
+    private function billingRules(): array
+    {
+        return [
+            'billing' => ['required', 'array'],
+            'billing.name' => ['required', 'string', 'max:255'],
+            'billing.email' => ['required', 'email', 'max:255'],
+            'billing.phone' => ['required', 'string', 'max:32'],
+            'billing.address' => ['required', 'string', 'max:1000'],
+            'billing.gstin' => ['nullable', 'string', 'max:20'],
+        ];
+    }
+
+    /** @return array{0:int,1:int,2:int,3:int} [base, gstRate, tax, total] in paise. */
+    private function amounts(Plan $plan): array
+    {
+        $base = (int) round($plan->price * 100);
+        $rate = (int) InvoiceSetting::current()->gst_rate;
+        $tax = (int) round($base * $rate / 100);
+        return [$base, $rate, $tax, $base + $tax];
+    }
+
+    /** Create a paid/free invoice snapshotting seller + customer + GST. */
+    private function generateInvoice(Subscription $subscription, Plan $plan, array $billing, int $base, int $rate, int $tax, int $total, string $status, ?string $paymentId): Invoice
+    {
+        $seller = InvoiceSetting::current();
+        $number = $this->nextInvoiceNumber($seller->invoice_prefix ?: 'INV');
+
+        return Invoice::create([
+            'tenant_id' => $subscription->tenant_id,
+            'subscription_id' => $subscription->id,
+            'number' => $number,
+            'status' => $status === 'free' ? 'paid' : $status,
+            'subtotal_minor' => $base,
+            'tax_minor' => $tax,
+            'total_minor' => $total,
+            'currency' => $plan->currency ?: 'INR',
+            'gateway' => $status === 'free' ? 'none' : 'razorpay',
+            'gateway_invoice_id' => $paymentId,
+            'line_items' => [[
+                'description' => $plan->name . ' plan (' . ($plan->billing_period === 'yearly' ? '1 year' : '1 month') . ')',
+                'amount_minor' => $base,
+            ]],
+            'meta' => [
+                'seller' => $seller->snapshot(),
+                'customer' => [
+                    'name' => $billing['name'],
+                    'email' => $billing['email'],
+                    'phone' => $billing['phone'],
+                    'address' => $billing['address'],
+                    'gstin' => $billing['gstin'] ?? null,
+                ],
+                'gst_rate' => $rate,
+                'plan_name' => $plan->name,
+                'billing_period' => $plan->billing_period,
+                'period_start' => $subscription->current_period_start?->toDateString(),
+                'period_end' => $subscription->current_period_end?->toDateString(),
+            ],
+            'issued_at' => now(),
+            'paid_at' => now(),
+        ]);
+    }
+
+    /** Sequential, human-readable invoice number: PREFIX-YYYY-000123. */
+    private function nextInvoiceNumber(string $prefix): string
+    {
+        $year = now()->format('Y');
+        $count = Invoice::withoutGlobalScopes()->whereYear('created_at', $year)->count() + 1;
+        return sprintf('%s-%s-%06d', $prefix, $year, $count);
     }
 
     /** Create or update the tenant's subscription to point at the given plan. */
@@ -266,6 +342,28 @@ class BillingController extends Controller
             'current_period_start' => $s->current_period_start?->toIso8601String(),
             'current_period_end' => $s->current_period_end?->toIso8601String(),
             'cancelled_at' => $s->cancelled_at?->toIso8601String(),
+        ];
+    }
+
+    /** Full invoice shape for listing / viewing / printing. */
+    private function invoiceArray(Invoice $inv): array
+    {
+        return [
+            'id' => $inv->uuid,
+            'number' => $inv->number,
+            'status' => $inv->status,
+            'subtotal' => $this->money($inv->subtotal_minor, $inv->currency),
+            'tax' => $this->money($inv->tax_minor, $inv->currency),
+            'total' => $this->money($inv->total_minor, $inv->currency),
+            'subtotal_minor' => $inv->subtotal_minor,
+            'tax_minor' => $inv->tax_minor,
+            'total_minor' => $inv->total_minor,
+            'currency' => $inv->currency,
+            'line_items' => $inv->line_items ?? [],
+            'meta' => $inv->meta ?? [],
+            'issued_at' => $inv->issued_at?->toIso8601String(),
+            'paid_at' => $inv->paid_at?->toIso8601String(),
+            'due_at' => $inv->due_at?->toIso8601String(),
         ];
     }
 

@@ -16,11 +16,12 @@ class Invoice extends Model
     protected $fillable = [
         'tenant_id', 'subscription_id', 'number', 'status', 'subtotal_minor',
         'tax_minor', 'total_minor', 'currency', 'gateway', 'gateway_invoice_id',
-        'line_items', 'issued_at', 'paid_at', 'due_at',
+        'line_items', 'meta', 'issued_at', 'paid_at', 'due_at',
     ];
 
     protected $casts = [
         'line_items' => 'array',
+        'meta' => 'array',
         'subtotal_minor' => 'integer',
         'tax_minor' => 'integer',
         'total_minor' => 'integer',

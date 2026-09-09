@@ -2,6 +2,7 @@
 
 use App\Modules\Admin\Controllers\CompanyController;
 use App\Modules\Admin\Controllers\PlanController;
+use App\Modules\Admin\Controllers\SettingsController;
 use Illuminate\Support\Facades\Route;
 
 // Platform super-admin: manage companies (tenants) and subscription plans.
@@ -20,4 +21,7 @@ Route::prefix('admin')->group(function () {
     Route::put('/plans/{uuid}', [PlanController::class, 'update']);
     Route::post('/plans/{uuid}/toggle', [PlanController::class, 'toggle']);
     Route::delete('/plans/{uuid}', [PlanController::class, 'destroy']);
+
+    Route::get('/settings', [SettingsController::class, 'show']);
+    Route::put('/settings', [SettingsController::class, 'update']);
 });
