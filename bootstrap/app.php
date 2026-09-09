@@ -39,9 +39,20 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null; // let the default handler deal with non-API requests
             }
 
+            // WhatsApp errors: show the user-safe message plus Meta's own detail
+            // (and code) so unmapped errors are actionable, not "please try again".
+            if ($e instanceof WhatsAppApiException) {
+                $msg = $e->userMessage;
+                $metaMsg = data_get($e->raw, 'error.message');
+                if ($metaMsg) {
+                    $msg .= ' — Meta: ' . $metaMsg;
+                } elseif ($e->metaCode) {
+                    $msg .= ' (Meta #' . $e->metaCode . ')';
+                }
+                return response()->json(['success' => false, 'message' => $msg], $e->httpStatus);
+            }
+
             [$status, $message] = match (true) {
-                // WhatsApp errors already carry a user-safe message + status.
-                $e instanceof WhatsAppApiException => [$e->httpStatus, $e->userMessage],
                 $e instanceof ValidationException => [422, 'The given data was invalid.'],
                 $e instanceof AuthenticationException => [401, 'Unauthenticated.'],
                 $e instanceof AuthorizationException => [403, 'This action is unauthorized.'],

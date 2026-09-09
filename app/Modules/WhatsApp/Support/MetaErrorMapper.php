@@ -22,6 +22,7 @@ class MetaErrorMapper
         131016 => ['WhatsApp is temporarily unavailable. Please try again shortly.', 503],
         131021 => ['The recipient cannot receive this message (they may have blocked the business).', 422],
         131026 => ['Message could not be delivered. The recipient may not be available on WhatsApp.', 422],
+        131030 => ['This recipient is not in your allowed list. Your WhatsApp number is in development mode — add the number as a test recipient in Meta, or complete business verification to message anyone.', 422],
         131047 => ['You can only message this contact with an approved template — the 24-hour window has closed.', 422],
         131051 => ['This message type is not supported.', 422],
         131052 => ['The media could not be downloaded by WhatsApp.', 422],
