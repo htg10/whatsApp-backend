@@ -29,6 +29,13 @@ return [
         'webhook_secret' => env('RAZORPAY_WEBHOOK_SECRET'),
     ],
 
+    'anthropic' => [
+        'key'   => env('ANTHROPIC_API_KEY'),
+        // Default to Anthropic's most capable model; override per deployment.
+        // For a high-volume WhatsApp chatbot, claude-haiku-4-5 is cheaper/faster.
+        'model' => env('ANTHROPIC_MODEL', 'claude-opus-5'),
+    ],
+
     'google' => [
         'client_id'     => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),

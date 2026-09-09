@@ -62,6 +62,8 @@ class ChatbotController extends Controller
             'welcome_message' => ['nullable', 'string'],
             'fallback_message' => ['nullable', 'string'],
             'is_active' => ['sometimes', 'boolean'],
+            'ai_enabled' => ['sometimes', 'boolean'],
+            'ai_instructions' => ['nullable', 'string', 'max:8000'],
         ]);
 
         $chatbot = Chatbot::create([
@@ -71,6 +73,8 @@ class ChatbotController extends Controller
             'welcome_message' => $data['welcome_message'] ?? null,
             'fallback_message' => $data['fallback_message'] ?? null,
             'is_active' => $data['is_active'] ?? false,
+            'ai_enabled' => $data['ai_enabled'] ?? false,
+            'ai_instructions' => $data['ai_instructions'] ?? null,
         ]);
 
         $chatbot->load('phoneNumber')->loadCount('rules');
@@ -90,6 +94,8 @@ class ChatbotController extends Controller
             'welcome_message' => ['nullable', 'string'],
             'fallback_message' => ['nullable', 'string'],
             'is_active' => ['sometimes', 'boolean'],
+            'ai_enabled' => ['sometimes', 'boolean'],
+            'ai_instructions' => ['nullable', 'string', 'max:8000'],
         ]);
 
         if (array_key_exists('phone_number_id', $data)) {

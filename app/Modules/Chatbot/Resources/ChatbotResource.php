@@ -15,6 +15,8 @@ class ChatbotResource extends JsonResource
             'is_active' => $this->is_active,
             'welcome_message' => $this->welcome_message,
             'fallback_message' => $this->fallback_message,
+            'ai_enabled' => (bool) $this->ai_enabled,
+            'ai_instructions' => $this->ai_instructions,
             'phone_number' => $this->whenLoaded('phoneNumber', fn () => $this->phoneNumber ? [
                 'id' => $this->phoneNumber->uuid,
                 'display_phone_number' => $this->phoneNumber->display_phone_number,

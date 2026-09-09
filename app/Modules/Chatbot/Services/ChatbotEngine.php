@@ -20,7 +20,10 @@ use Illuminate\Support\Str;
  */
 class ChatbotEngine
 {
-    public function __construct(private readonly WhatsAppMessageService $messages) {}
+    public function __construct(
+        private readonly WhatsAppMessageService $messages,
+        private readonly AiReplyService $ai,
+    ) {}
 
     public function handleInbound(
         WhatsappPhoneNumber $phone,
@@ -64,6 +67,9 @@ class ChatbotEngine
         try {
             if ($matched) {
                 $this->sendResponse($phone, $to, $matched, $conversation, $contact);
+            } elseif ($chatbot->ai_enabled && ($aiReply = $this->ai->generate($chatbot, $conversation, $body))) {
+                // No keyword rule matched — let the AI answer from the business context.
+                $this->replyText($phone, $to, $aiReply, $conversation, $contact);
             } elseif ($chatbot->fallback_message) {
                 $this->replyText($phone, $to, $chatbot->fallback_message, $conversation, $contact);
             }

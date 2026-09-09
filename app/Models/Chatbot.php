@@ -17,11 +17,12 @@ class Chatbot extends Model
 
     protected $fillable = [
         'tenant_id', 'whatsapp_phone_number_id', 'name', 'is_active',
-        'welcome_message', 'fallback_message',
+        'welcome_message', 'fallback_message', 'ai_enabled', 'ai_instructions',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'ai_enabled' => 'boolean',
     ];
 
     public function phoneNumber(): BelongsTo
