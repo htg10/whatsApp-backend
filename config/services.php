@@ -35,7 +35,9 @@ return [
         // Where Google sends the user back — must exactly match the "Authorized
         // redirect URI" in the Google Cloud console, e.g.
         // https://main.heltog.com/api/v1/auth/google/callback
-        'redirect'      => env('GOOGLE_REDIRECT_URI'),
+        // Falls back to APP_URL + the callback path so it stays consistent even
+        // if GOOGLE_REDIRECT_URI is not set explicitly.
+        'redirect'      => env('GOOGLE_REDIRECT_URI', rtrim((string) env('APP_URL', ''), '/') . '/api/v1/auth/google/callback'),
         // Where we send the user after issuing a token (the frontend app).
         'frontend_url'  => env('FRONTEND_URL', 'https://frontend.heltog.com'),
     ],
