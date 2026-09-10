@@ -33,7 +33,11 @@ class ChatbotEngine
         ?string $body
     ): void {
         // Only auto-reply to plain text, and never when a human agent is handling.
-        if ($type !== 'text' || ! $body || $conversation->assigned_agent_id) {
+        if ($type !== 'text' || ! $body) {
+            return;
+        }
+        if ($conversation->assigned_agent_id) {
+            Log::info('chatbot: skipped — chat is assigned to an agent', ['conversation' => $conversation->id]);
             return;
         }
 
@@ -48,6 +52,7 @@ class ChatbotEngine
             ->first();
 
         if (! $chatbot) {
+            Log::info('chatbot: no active chatbot for this number', ['tenant' => $phone->tenant_id, 'phone' => $phone->id]);
             return;
         }
 
@@ -66,12 +71,23 @@ class ChatbotEngine
 
         try {
             if ($matched) {
+                Log::info('chatbot: rule matched', ['chatbot' => $chatbot->id, 'keyword' => $matched->keyword]);
                 $this->sendResponse($phone, $to, $matched, $conversation, $contact);
-            } elseif ($chatbot->ai_enabled && ($aiReply = $this->ai->generate($chatbot, $conversation, $body))) {
-                // No keyword rule matched — let the AI answer from the business context.
-                $this->replyText($phone, $to, $aiReply, $conversation, $contact);
+            } elseif ($chatbot->ai_enabled) {
+                $aiReply = $this->ai->generate($chatbot, $conversation, $body);
+                if ($aiReply) {
+                    Log::info('chatbot: AI replied', ['chatbot' => $chatbot->id]);
+                    $this->replyText($phone, $to, $aiReply, $conversation, $contact);
+                } elseif ($chatbot->fallback_message) {
+                    Log::warning('chatbot: AI enabled but returned nothing (check AI API key/model) — sending fallback', ['chatbot' => $chatbot->id]);
+                    $this->replyText($phone, $to, $chatbot->fallback_message, $conversation, $contact);
+                } else {
+                    Log::warning('chatbot: AI enabled but returned nothing and no fallback set (check GEMINI_API_KEY/ANTHROPIC_API_KEY on the server)', ['chatbot' => $chatbot->id]);
+                }
             } elseif ($chatbot->fallback_message) {
                 $this->replyText($phone, $to, $chatbot->fallback_message, $conversation, $contact);
+            } else {
+                Log::info('chatbot: no rule matched, AI off, no fallback — no reply sent', ['chatbot' => $chatbot->id]);
             }
         } catch (\Throwable $e) {
             Log::warning('Chatbot auto-reply failed: ' . $e->getMessage(), ['chatbot' => $chatbot->id]);

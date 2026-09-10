@@ -24,8 +24,10 @@ class AiReplyService
     {
         $provider = $this->resolveProvider();
         if ($provider === null) {
+            Log::warning('AI reply skipped: no API key configured (set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env, then php artisan config:clear)');
             return null; // no AI key configured — skip AI, let caller use fallback
         }
+        Log::info('AI reply: using provider ' . $provider);
 
         $system = $this->systemPrompt($chatbot);
         $messages = $this->history($conversation, $incoming);
