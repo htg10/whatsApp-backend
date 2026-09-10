@@ -15,6 +15,7 @@ class MetaErrorMapper
         3      => ['This WhatsApp number is not allowed to perform this action.', 403],
         10     => ['This WhatsApp number is not allowed to perform this action.', 403],
         100    => ['The request to WhatsApp was invalid. Please check the details and try again.', 422],
+        200    => ['Your WhatsApp access token cannot send on this number. Re-connect with a permanent System User token that has whatsapp_business_messaging + whatsapp_business_management permissions and whose System User is assigned to this WhatsApp Business Account.', 403],
         131000 => ['Something went wrong on WhatsApp\'s side. Please try again.', 502],
         131005 => ['Access to this WhatsApp resource was denied.', 403],
         131008 => ['A required field was missing from the WhatsApp request.', 422],
