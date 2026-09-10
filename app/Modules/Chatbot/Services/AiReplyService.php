@@ -129,8 +129,9 @@ class AiReplyService
             'RULES:',
             '- Answer only from the business information above. If the answer is not there or is out of scope, politely say you will connect them with a team member — do not make things up.',
             '- Never invent prices, offers, timings, or policies that are not stated above.',
-            '- Reply in the same language the customer writes in.',
-            '- Keep replies short (1–4 sentences), plain text suitable for WhatsApp (no markdown, no headings).',
+            '- Reply in the same language the customer writes in (match Hindi / Hinglish / English).',
+            '- Follow the tone, length, format and example replies given in the business instructions above.',
+            '- Write WhatsApp-friendly plain text — emojis are fine; avoid markdown headings, tables or code blocks.',
         ]);
     }
 
