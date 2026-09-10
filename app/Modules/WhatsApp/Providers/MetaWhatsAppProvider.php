@@ -98,6 +98,14 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
             fn (PendingRequest $g) => $g->post("/{$phoneNumberId}/register", $body));
     }
 
+    public function subscribeApp(string $wabaId): array
+    {
+        // Subscribe this app to the WABA — required before the app's token can
+        // send messages on the WABA's numbers (a common cause of Meta #200).
+        return $this->perform('POST', "/{$wabaId}/subscribed_apps", [],
+            fn (PendingRequest $g) => $g->post("/{$wabaId}/subscribed_apps"));
+    }
+
     public function uploadMedia(string $phoneNumberId, string $path, string $mime): array
     {
         return $this->perform('POST', "/{$phoneNumberId}/media", ['type' => $mime, 'file' => '<binary>'],

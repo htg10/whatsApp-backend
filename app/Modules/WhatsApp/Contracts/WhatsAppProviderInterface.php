@@ -23,6 +23,8 @@ interface WhatsAppProviderInterface
 
     public function registerPhoneNumber(string $phoneNumberId, string $pin): array;
 
+    public function subscribeApp(string $wabaId): array;
+
     public function uploadMedia(string $phoneNumberId, string $path, string $mime): array;
 
     public function downloadMedia(string $mediaId): array;

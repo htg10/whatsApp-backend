@@ -21,6 +21,7 @@ Route::prefix('whatsapp')->group(function () {
 
     Route::post('/numbers/{number}/sync', [WhatsAppAccountController::class, 'sync']);
     Route::post('/numbers/{number}/register', [WhatsAppAccountController::class, 'register']);
+    Route::post('/numbers/{number}/subscribe-app', [WhatsAppAccountController::class, 'subscribeApp']);
     Route::post('/numbers/{number}/send-test', [WhatsAppAccountController::class, 'sendTest']);
     Route::delete('/numbers/{number}', [WhatsAppAccountController::class, 'destroy']);
 

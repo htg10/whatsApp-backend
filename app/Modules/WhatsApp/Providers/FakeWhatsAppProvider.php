@@ -57,6 +57,12 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
         return ['success' => true];
     }
 
+    public function subscribeApp(string $wabaId): array
+    {
+        $this->sent[] = ['subscribed' => $wabaId];
+        return ['success' => true];
+    }
+
     public function uploadMedia(string $phoneNumberId, string $path, string $mime): array
     {
         return ['id' => 'media_' . Str::random(12)];

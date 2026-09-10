@@ -95,6 +95,15 @@ class WhatsAppAccountController extends Controller
         )]);
     }
 
+    /** Subscribe the app to this number's WABA (fixes Meta #200 "no permission to send"). */
+    public function subscribeApp(Request $request, WhatsappPhoneNumber $number): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+        $this->accounts->subscribeApp($number);
+
+        return $this->ok(['message' => 'App subscribed to the WhatsApp Business Account. Try sending again.']);
+    }
+
     public function destroy(Request $request, WhatsappPhoneNumber $number): JsonResponse
     {
         $this->authorize('whatsapp.manage');

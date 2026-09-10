@@ -56,7 +56,7 @@ class WhatsAppAccountService extends BaseService
             ]);
         }
 
-        return DB::transaction(function () use ($tenantId, $data, $existing) {
+        $phone = DB::transaction(function () use ($tenantId, $data, $existing) {
             $waba = WhatsappBusinessAccount::firstOrCreate(
                 ['tenant_id' => $tenantId, 'waba_id' => $data['waba_id']],
                 [
@@ -95,6 +95,16 @@ class WhatsAppAccountService extends BaseService
 
             return $phone->load('businessAccount');
         });
+
+        // Subscribe the app to the WABA so the token can send (best-effort — a
+        // failure here must not block the connection).
+        try {
+            $this->subscribeApp($phone);
+        } catch (\Throwable $e) {
+            \Log::warning('whatsapp.subscribe_app.failed on connect: ' . $e->getMessage());
+        }
+
+        return $phone;
     }
 
     /**
@@ -114,6 +124,17 @@ class WhatsAppAccountService extends BaseService
         ], fn ($v) => $v !== null));
 
         return $phone->fresh('businessAccount');
+    }
+
+    /**
+     * Subscribe the app to the number's WABA (required before the app's token can
+     * send). Best-effort — returns the Meta result. Throws on hard failure so the
+     * controller can surface it.
+     */
+    public function subscribeApp(WhatsappPhoneNumber $phone): array
+    {
+        $waba = $phone->businessAccount()->firstOrFail();
+        return $this->factory->for($waba)->subscribeApp($waba->waba_id);
     }
 
     /** Register the phone on Cloud API with a 6-digit PIN (two-step verification). */
