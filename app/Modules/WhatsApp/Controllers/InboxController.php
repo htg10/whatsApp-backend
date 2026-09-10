@@ -117,7 +117,9 @@ class InboxController extends Controller
             'sender_user_id' => $request->user()->id,
             'direction' => Message::DIRECTION_OUTBOUND,
             'type' => $type === 'template' ? 'template' : 'text',
-            'body' => $data['body'] ?? "[Template: " . ($data['template'] ?? '') . "]",
+            'body' => $data['body']
+                ?? (\App\Models\Template::bodyText($conversation->tenant_id, $data['template'] ?? '', $data['language'] ?? null)
+                    ?: '📄 Template: ' . ($data['template'] ?? '')),
             'external_message_id' => $wamid,
             'status' => 'sent',
             'sent_at' => now(),

@@ -67,6 +67,35 @@ class SocialController extends Controller
         return $this->ok(['connection' => $this->connectionArray($conn->fresh())]);
     }
 
+    /** Re-detect the Instagram Business account for the connected Page (no reconnect). */
+    public function recheckInstagram(Request $request): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+
+        $conn = SocialConnection::first();
+        if (! $conn) {
+            return $this->fail('Connect a Facebook Page first.', [], 422);
+        }
+
+        try {
+            $info = $this->meta->inspectPage($conn->page_id, $conn->page_access_token);
+        } catch (\Throwable $e) {
+            return $this->fail('Could not re-check the Page: ' . $e->getMessage(), [], 422);
+        }
+
+        $conn->update([
+            'ig_user_id' => $info['ig_user_id'],
+            'ig_username' => $info['ig_username'],
+        ]);
+
+        return $this->ok([
+            'connection' => $this->connectionArray($conn->fresh()),
+            'message' => $info['ig_user_id']
+                ? 'Instagram linked: @' . $info['ig_username']
+                : 'No Instagram Business account is linked to this Facebook Page. In Meta, link an Instagram Business/Creator account to the Page (and ensure the token has instagram permissions), then re-check.',
+        ]);
+    }
+
     public function disconnect(Request $request): JsonResponse
     {
         $this->authorize('whatsapp.manage');

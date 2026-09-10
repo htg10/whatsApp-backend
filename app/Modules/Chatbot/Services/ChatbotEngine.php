@@ -98,7 +98,8 @@ class ChatbotEngine
     {
         if ($rule->response_type === 'template' && $rule->template_name) {
             $result = $this->messages->sendTemplate($phone, $to, $rule->template_name, 'en');
-            $this->recordOutbound($phone, $conversation, $contact, "[template: {$rule->template_name}]", 'template', $result);
+            $body = \App\Models\Template::bodyText($phone->tenant_id, $rule->template_name) ?: "📄 Template: {$rule->template_name}";
+            $this->recordOutbound($phone, $conversation, $contact, $body, 'template', $result);
         } elseif ($rule->response_text) {
             $this->replyText($phone, $to, $rule->response_text, $conversation, $contact);
         }
