@@ -33,7 +33,7 @@ class SuperAdminSeeder extends Seeder
         $password = env('SUPER_ADMIN_PASSWORD');
         if ($password !== null && $password !== '') {
             $admin->password = Hash::make($password); // explicit env value → always sync
-        } elseif (! $admin->exists) {
+        } elseif (!$admin->exists) {
             $admin->password = Hash::make('password'); // local default, only on first create
         }
 

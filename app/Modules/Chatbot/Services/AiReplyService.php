@@ -64,7 +64,7 @@ class AiReplyService
     /** @param array<int, array{role:string, content:string}> $messages */
     private function callGemini(string $system, array $messages): ?string
     {
-        $model = config('services.gemini.model', 'gemini-2.0-flash');
+        $model = config('services.gemini.model', 'gemini-3.6-flash');
         $contents = array_map(fn ($m) => [
             'role' => $m['role'] === 'assistant' ? 'model' : 'user',
             'parts' => [['text' => $m['content']]],

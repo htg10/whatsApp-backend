@@ -22,14 +22,13 @@ class WhatsAppWebhookController
         $token = $request->query('hub_verify_token');
         $challenge = $request->query('hub_challenge');
 
-        if ($mode === 'subscribe' && $token === config('services.meta.verify_token')) {
+        if ($mode === 'subscribe' && $this->isValidVerifyToken($token)) {
             Log::info('WhatsApp webhook verified.');
             return response($challenge, 200)->header('Content-Type', 'text/plain');
         }
 
         Log::warning('WhatsApp webhook verification failed.', [
             'mode' => $mode,
-            'token_match' => $token === config('services.meta.verify_token'),
         ]);
 
         return response('Forbidden', 403);
@@ -97,10 +96,30 @@ class WhatsAppWebhookController
         }
     }
 
+    private function isValidVerifyToken(?string $token): bool
+    {
+        if (empty($token)) {
+            return false;
+        }
+
+        $primary = config('services.meta.verify_token');
+        if ($primary && $token === $primary) {
+            return true;
+        }
+
+        foreach (config('services.meta.verify_tokens', []) as $validToken) {
+            if ($token === $validToken) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function verifySignature(Request $request): bool
     {
-        $secret = config('services.meta.app_secret');
-        if (empty($secret)) {
+        $secrets = $this->getAllAppSecrets();
+        if (empty($secrets)) {
             return true;
         }
 
@@ -109,8 +128,32 @@ class WhatsAppWebhookController
             return false;
         }
 
-        $expected = 'sha256=' . hash_hmac('sha256', $request->getContent(), $secret);
+        $content = $request->getContent();
+        foreach ($secrets as $secret) {
+            $expected = 'sha256=' . hash_hmac('sha256', $content, $secret);
+            if (hash_equals($expected, $signature)) {
+                return true;
+            }
+        }
 
-        return hash_equals($expected, $signature);
+        return false;
+    }
+
+    private function getAllAppSecrets(): array
+    {
+        $secrets = [];
+
+        $primary = config('services.meta.app_secret');
+        if (! empty($primary)) {
+            $secrets[] = $primary;
+        }
+
+        foreach (config('services.meta.app_secrets', []) as $secret) {
+            if (! in_array($secret, $secrets, true)) {
+                $secrets[] = $secret;
+            }
+        }
+
+        return $secrets;
     }
 }

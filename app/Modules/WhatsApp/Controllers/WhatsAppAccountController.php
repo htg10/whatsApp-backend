@@ -104,6 +104,25 @@ class WhatsAppAccountController extends Controller
         return $this->ok(['message' => 'App subscribed to the WhatsApp Business Account. Try sending again.']);
     }
 
+    /** Update the WABA access token for a connected number (fixes #200 token issues). */
+    public function updateToken(Request $request, WhatsappPhoneNumber $number): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+        $request->validate(['access_token' => ['required', 'string', 'min:10']]);
+
+        $waba = $number->businessAccount()->firstOrFail();
+        $waba->update(['access_token' => $request->string('access_token')]);
+
+        // Re-subscribe app with the new token.
+        try {
+            $this->accounts->subscribeApp($number);
+        } catch (\Throwable $e) {
+            \Log::warning('whatsapp.subscribe_app.failed on token update: ' . $e->getMessage());
+        }
+
+        return $this->ok(['message' => 'Access token updated. Try sending again.']);
+    }
+
     public function destroy(Request $request, WhatsappPhoneNumber $number): JsonResponse
     {
         $this->authorize('whatsapp.manage');

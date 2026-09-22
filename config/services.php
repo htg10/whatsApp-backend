@@ -5,6 +5,8 @@ return [
         'app_id'            => env('META_APP_ID'),
         'app_secret'        => env('META_APP_SECRET'),
         'verify_token'      => env('META_VERIFY_TOKEN', env('WHATSAPP_WEBHOOK_VERIFY_TOKEN')),
+        'app_secrets'       => array_filter(array_map('trim', explode(',', env('META_APP_SECRETS', '')))),
+        'verify_tokens'     => array_filter(array_map('trim', explode(',', env('META_VERIFY_TOKENS', '')))),
         'api_version'       => env('META_API_VERSION', 'v23.0'),
         'config_id'         => env('META_CONFIG_ID'),
         // System User token is the production credential. Encrypted at rest per WABA
@@ -45,7 +47,7 @@ return [
     'gemini' => [
         'key'   => env('GEMINI_API_KEY'),
         // Fast, low-cost default; override with GEMINI_MODEL (e.g. gemini-1.5-flash).
-        'model' => env('GEMINI_MODEL', 'gemini-2.0-flash'),
+        'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
     ],
 
     'google' => [
