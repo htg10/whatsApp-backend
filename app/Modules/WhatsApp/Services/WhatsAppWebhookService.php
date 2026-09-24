@@ -11,6 +11,7 @@ use App\Models\WebhookEvent;
 use App\Models\WebhookLog;
 use App\Models\WhatsappPhoneNumber;
 use App\Modules\WhatsApp\Contracts\WhatsAppProviderInterface;
+use App\Modules\WhatsApp\Services\WhatsAppProviderFactory;
 use App\Support\Services\BaseService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -25,7 +26,7 @@ class WhatsAppWebhookService extends BaseService
         $msg = $payload['message'] ?? [];
         $contactInfo = $payload['contacts'][0] ?? [];
 
-        $phone = WhatsappPhoneNumber::where('phone_number_id', $phoneNumberId)->first();
+        $phone = WhatsappPhoneNumber::with('businessAccount')->where('phone_number_id', $phoneNumberId)->first();
 
         if (! $phone) {
             $this->log($event, 'warning', 'message.orphaned', 'Phone number not found in system', [
@@ -120,7 +121,10 @@ class WhatsAppWebhookService extends BaseService
 
             if ($metaMediaId) {
                 try {
-                    $provider = app(WhatsAppProviderInterface::class);
+                    $waba = $phone->businessAccount;
+                    $provider = $waba
+                        ? app(WhatsAppProviderFactory::class)->for($waba)
+                        : app(WhatsAppProviderInterface::class);
                     $downloaded = $provider->downloadMedia($metaMediaId);
 
                     $ext = $this->guessExtension($downloaded['mime_type'] ?? $mediaData['mime_type'] ?? null, $msgType);

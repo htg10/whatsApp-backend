@@ -2,6 +2,7 @@
 
 namespace App\Modules\Auth\Resources;
 
+use App\Models\Subscription;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -34,8 +35,31 @@ class UserResource extends JsonResource
             'plan_limits' => (! $this->is_super_admin && $this->tenant_id)
                 ? app(\App\Modules\Billing\Services\PlanLimitService::class)->limitsMap($this->tenant_id)
                 : null,
+            'subscription' => $this->subscriptionSummary(),
             'tenant' => new TenantResource($this->whenLoaded('tenant')),
             'last_login_at' => $this->last_login_at?->toIso8601String(),
+        ];
+    }
+
+    private function subscriptionSummary(): ?array
+    {
+        if ($this->is_super_admin || ! $this->tenant_id) {
+            return null;
+        }
+
+        $sub = Subscription::withoutGlobalScopes()
+            ->where('tenant_id', $this->tenant_id)
+            ->latest('id')
+            ->with('plan')
+            ->first();
+
+        if (! $sub) {
+            return null;
+        }
+
+        return [
+            'status' => $sub->status,
+            'plan_name' => $sub->plan?->name,
         ];
     }
 }
