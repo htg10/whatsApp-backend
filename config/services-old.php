@@ -37,12 +37,6 @@ return [
         'provider' => env('AI_PROVIDER'),
     ],
 
-    // Hot list: also let the AI judge messages the keyword check can't decide.
-    // Set HOT_LEAD_AI=false to use keywords only.
-    'hot_lead' => [
-        'ai' => env('HOT_LEAD_AI', true),
-    ],
-
     'anthropic' => [
         'key'   => env('ANTHROPIC_API_KEY'),
         // Default to Anthropic's most capable model; override per deployment.

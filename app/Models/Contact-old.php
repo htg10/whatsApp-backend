@@ -20,15 +20,12 @@ class Contact extends Model
         'tenant_id', 'wa_id', 'phone', 'name', 'email', 'company', 'tag_list', 'source',
         'lead_status_id', 'assigned_agent_id', 'language', 'country',
         'is_blocked', 'opted_out', 'last_interaction_at', 'meta',
-        'is_hot', 'hot_reason', 'hot_at', 'hot_source',
     ];
 
     // NOTE: tag_list is a plain varchar column (text), so it must NOT be cast to array
     protected $casts = [
         'is_blocked' => 'boolean',
         'opted_out' => 'boolean',
-        'is_hot' => 'boolean',
-        'hot_at' => 'datetime',
         'last_interaction_at' => 'datetime',
         'meta' => 'array',
     ];

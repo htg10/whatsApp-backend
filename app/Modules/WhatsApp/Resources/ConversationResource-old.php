@@ -23,8 +23,6 @@ class ConversationResource extends JsonResource
                 'name' => $this->contact->name,
                 'phone' => $this->contact->phone,
                 'wa_id' => $this->contact->wa_id,
-                'is_hot' => (bool) $this->contact->is_hot,
-                'hot_reason' => $this->contact->hot_reason,
             ]),
             'phone_number' => $this->whenLoaded('phoneNumber', fn () => [
                 'id' => $this->phoneNumber->uuid,

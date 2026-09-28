@@ -10,7 +10,6 @@ Route::prefix('contacts')->group(function () {
     Route::post('/', [ContactController::class, 'store']);
     Route::post('/import', [ContactController::class, 'import']);
     Route::get('/{uuid}', [ContactController::class, 'show']);
-    Route::put('/{uuid}/hot', [ContactController::class, 'setHot']);
     Route::put('/{uuid}', [ContactController::class, 'update']);
     Route::delete('/{uuid}', [ContactController::class, 'destroy']);
 });

@@ -42,29 +42,6 @@ class AiReplyService
         }
     }
 
-    /**
-     * One-shot completion with a custom system prompt (used for classification,
-     * e.g. hot-lead detection). Returns null when no AI key is set or the call fails.
-     *
-     * @param array<int, array{role:string, content:string}> $messages
-     */
-    public function classify(string $system, array $messages): ?string
-    {
-        $provider = $this->resolveProvider();
-        if ($provider === null) {
-            return null;
-        }
-
-        try {
-            return $provider === 'gemini'
-                ? $this->callGemini($system, $messages)
-                : $this->callAnthropic($system, $messages);
-        } catch (\Throwable $e) {
-            Log::warning('AI classify request failed: ' . $e->getMessage());
-            return null;
-        }
-    }
-
     /** Which provider to use: explicit config, else auto-detect by available key. */
     private function resolveProvider(): ?string
     {

@@ -162,14 +162,6 @@ class WhatsAppWebhookService extends BaseService
         } catch (\Throwable $e) {
             $this->log($event, 'warning', 'chatbot.failed', 'Chatbot auto-reply error: ' . $e->getMessage());
         }
-
-        // Hot-lead detection (best-effort) — flags contacts who show buying interest.
-        try {
-            app(\App\Modules\Chatbot\Services\HotLeadDetector::class)
-                ->evaluate($contact->fresh(), $conversation->fresh(), $msgType, $body);
-        } catch (\Throwable $e) {
-            $this->log($event, 'warning', 'hotlead.failed', 'Hot-lead detection error: ' . $e->getMessage());
-        }
     }
 
     public function handleStatusUpdate(WebhookEvent $event): void
