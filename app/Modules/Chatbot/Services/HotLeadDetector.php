@@ -2,6 +2,7 @@
 
 namespace App\Modules\Chatbot\Services;
 
+use App\Models\Chatbot;
 use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
@@ -10,14 +11,16 @@ use Illuminate\Support\Str;
 
 /**
  * Hot-lead detection. Looks at every inbound customer message and, when the
- * customer shows buying interest (price, demo, order, "interested", "chahiye"…),
- * flags the contact as hot (contacts.is_hot) so it appears on the Hot List.
+ * customer shows buying interest, flags the contact as hot (contacts.is_hot)
+ * so it appears on the Hot List.
  *
- *  1. Fast keyword check (English / Hinglish / Hindi) — free, instant.
- *  2. If the keywords are inconclusive and an AI key is configured, ask the AI
- *     to judge the recent conversation (HOT_LEAD_AI=false turns this off).
+ *  1. The AI decides. It reads the recent conversation (customer + bot replies)
+ *     and the business info, and judges whether the customer is a hot lead —
+ *     in English, Hindi or Hinglish. This is the main path.
+ *  2. Only if the AI is unavailable (no API key / request failed) a quick
+ *     keyword check is used as a fallback, so nothing is missed.
  *
- * An explicit "not interested / stop" never flags a contact.
+ * HOT_LEAD_AI=false skips the AI and uses keywords only.
  */
 class HotLeadDetector
 {
@@ -37,11 +40,22 @@ class HotLeadDetector
     private const AI_SYSTEM = <<<'TXT'
 You screen WhatsApp conversations for a business and decide whether the CUSTOMER is a hot sales lead.
 
-A hot lead is a customer who shows real buying interest: asks about price/plans/availability, wants a demo, call, meeting or visit, wants to order/book/sign up, shares requirements, or says they are interested.
-NOT hot: greetings, thanks, one-word acknowledgements, spam, complaints, support questions, or anyone who says they are not interested.
+You get the business information, the recent conversation (Customer / Business lines) and the customer's latest message. Judge the latest message IN CONTEXT of the conversation.
+
+HOT (true) when the customer shows real buying interest, for example:
+- asks about price, plans, packages, availability, timelines or how the service works for them
+- wants a demo, call, meeting, site visit or quotation
+- wants to order, book, buy or sign up, or asks how to pay
+- shares their requirement or says they are interested / "haan", "yes", "ok send" in reply to the business offering something
+- asks for details, brochure, samples or portfolio in a way that shows they may buy
+
+NOT hot (false):
+- greetings, thanks, one-word acknowledgements with no offer to accept, spam, jokes
+- support problems or complaints, job seekers, wrong number
+- anyone who says they are not interested / do not want it / stop messaging
 
 The customer may write in English, Hindi or Hinglish.
-Reply with ONLY a JSON object, no other text:
+Reply with ONLY a JSON object and nothing else:
 {"hot": true or false, "reason": "<max 12 words, why>"}
 TXT;
 
@@ -58,10 +72,19 @@ TXT;
             return; // nothing to read, or already on the hot list
         }
 
-        $verdict = $this->byKeywords($body);
+        $verdict = null;
 
-        if ($verdict === null && config('services.hot_lead.ai', true) && mb_strlen($body) >= 6) {
+        // 1) AI decides (main path).
+        if (config('services.hot_lead.ai', true)) {
             $verdict = $this->byAi($conversation, $body);
+        }
+
+        // 2) Fallback only when the AI could not answer (no key / request failed).
+        if ($verdict === null) {
+            $verdict = $this->byKeywords($body);
+            if ($verdict !== null) {
+                Log::info('hot-lead: AI unavailable, used keyword fallback', ['contact' => $contact->id]);
+            }
         }
 
         if ($verdict && $verdict['hot']) {
@@ -88,7 +111,7 @@ TXT;
     }
 
     /**
-     * @return array{hot: bool, reason: string}|null
+     * @return array{hot: bool, reason: string}|null  null = AI unavailable / unusable answer
      */
     private function byAi(Conversation $conversation, string $body): ?array
     {
@@ -97,7 +120,7 @@ TXT;
             ->where('type', 'text')
             ->whereNotNull('body')
             ->orderByDesc('id')
-            ->limit(6)
+            ->limit(8)
             ->get()
             ->reverse();
 
@@ -106,10 +129,16 @@ TXT;
                 . ': ' . Str::limit(trim((string) $m->body), 300))
             ->implode("\n");
 
-        $raw = $this->ai->classify(self::AI_SYSTEM, [[
-            'role' => 'user',
-            'content' => "Conversation so far:\n{$transcript}\n\nLatest customer message: {$body}",
-        ]]);
+        $business = trim((string) Chatbot::withoutGlobalScopes()
+            ->where('tenant_id', $conversation->tenant_id)
+            ->where('is_active', true)
+            ->whereNotNull('ai_instructions')
+            ->value('ai_instructions'));
+
+        $prompt = ($business !== '' ? "Business information:\n" . Str::limit($business, 1500) . "\n\n" : '')
+            . "Conversation so far:\n{$transcript}\n\nLatest customer message: {$body}";
+
+        $raw = $this->ai->classify(self::AI_SYSTEM, [['role' => 'user', 'content' => $prompt]]);
 
         if (! $raw || ! preg_match('/\{.*\}/s', $raw, $m)) {
             return null;
@@ -120,9 +149,12 @@ TXT;
             return null;
         }
 
+        $hot = $json['hot'] === true || $json['hot'] === 'true';
         $reason = trim((string) ($json['reason'] ?? '')) ?: 'Shows buying interest';
 
-        return ['hot' => $json['hot'] === true, 'reason' => 'AI: ' . Str::limit($reason, 200)];
+        Log::info('hot-lead: AI verdict', ['conversation' => $conversation->id, 'hot' => $hot, 'reason' => $reason]);
+
+        return ['hot' => $hot, 'reason' => 'AI: ' . Str::limit($reason, 200)];
     }
 
     private function markHot(Contact $contact, string $reason): void
