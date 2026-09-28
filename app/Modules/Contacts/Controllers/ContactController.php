@@ -207,6 +207,7 @@ class ContactController extends Controller
                 ->where('tenant_id', $tenantId)
                 ->where('wa_id', $waId)
                 ->first();
+                
 
             if ($contact) {
                 if ($contact->trashed()) {
