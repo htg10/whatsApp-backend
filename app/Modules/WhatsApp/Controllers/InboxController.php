@@ -3,6 +3,7 @@
 namespace App\Modules\WhatsApp\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\MessageAttachment;
@@ -23,6 +24,8 @@ class InboxController extends Controller
         $this->authorize('whatsapp.view');
 
         $query = Conversation::with(['contact', 'phoneNumber', 'assignedAgent'])
+            // AI-selected hot leads first (highest priority score on top), then newest chats.
+            ->orderByRaw('(SELECT ' . Contact::hotPrioritySql('hc') . ' FROM contacts hc WHERE hc.id = conversations.contact_id LIMIT 1) DESC')
             ->orderByDesc('last_message_at');
 
         if ($status = $request->query('status')) {

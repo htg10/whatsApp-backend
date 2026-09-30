@@ -33,7 +33,15 @@ class ContactController extends Controller
         }
 
         if ($request->query('hot') === '1') {
-            $query->where('is_hot', true)->reorder()->orderByDesc('hot_at');
+            // Hot List = contacts the AI tagged "Hot" in contacts.tag_list
+            $query->whereRaw(
+                "CONCAT(',', REPLACE(REPLACE(tag_list, ', ', ','), ' ', ''), ',') LIKE ?",
+                ['%,' . Contact::HOT_TAG . ',%']
+            );
+            // First priority first: highest AI score, then most recent chat.
+            $query->reorder()
+                ->orderByRaw(Contact::hotPrioritySql('contacts') . ' DESC')
+                ->orderByDesc('last_interaction_at');
         }
 
         if ($request->query('blocked') === '1') {
@@ -129,37 +137,6 @@ class ContactController extends Controller
         // tag_list is saved directly in the contacts table (empty text clears it)
         if (array_key_exists('tags', $data) || array_key_exists('tag_list', $data)) {
             $contact->update(['tag_list' => $this->tagText($data)]);
-        }
-
-        return $this->ok(['contact' => new ContactResource($contact->fresh(['assignedAgent']))]);
-    }
-
-    /** Add / remove a contact from the Hot List by hand. */
-    public function setHot(Request $request, string $uuid): JsonResponse
-    {
-        $this->authorize('contacts.update');
-
-        $data = $request->validate([
-            'is_hot' => ['required', 'boolean'],
-            'reason' => ['nullable', 'string', 'max:255'],
-        ]);
-
-        $contact = Contact::where('uuid', $uuid)->firstOrFail();
-
-        if ($data['is_hot']) {
-            $contact->forceFill([
-                'is_hot' => true,
-                'hot_reason' => $data['reason'] ?? ($contact->hot_reason ?: 'Marked hot manually'),
-                'hot_at' => now(),
-                'hot_source' => 'manual',
-            ])->save();
-        } else {
-            $contact->forceFill([
-                'is_hot' => false,
-                'hot_reason' => null,
-                'hot_at' => null,
-                'hot_source' => null,
-            ])->save();
         }
 
         return $this->ok(['contact' => new ContactResource($contact->fresh(['assignedAgent']))]);

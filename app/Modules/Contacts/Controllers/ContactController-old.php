@@ -32,6 +32,18 @@ class ContactController extends Controller
             $query->whereHas('tags', fn ($q) => $q->where('tags.uuid', $tag));
         }
 
+        if ($request->query('hot') === '1') {
+            // Hot List = contacts the AI tagged "Hot" in contacts.tag_list
+            $query->whereRaw(
+                "CONCAT(',', REPLACE(REPLACE(tag_list, ', ', ','), ' ', ''), ',') LIKE ?",
+                ['%,' . Contact::HOT_TAG . ',%']
+            );
+            // First priority first: highest AI score, then most recent chat.
+            $query->reorder()
+                ->orderByRaw(Contact::hotPrioritySql('contacts') . ' DESC')
+                ->orderByDesc('last_interaction_at');
+        }
+
         if ($request->query('blocked') === '1') {
             $query->where('is_blocked', true);
         }
