@@ -8,8 +8,7 @@ use Illuminate\Support\Facades\Schema;
  * A person the tenant talks to. wa_id is the normalized E.164 number without '+'
  * (Meta's contact identifier). Unique per tenant to prevent duplicates.
  */
-return new class extends Migration
-{
+return new class extends Migration {
     public function up(): void
     {
         Schema::create('contacts', function (Blueprint $table) {
@@ -21,6 +20,7 @@ return new class extends Migration
             $table->string('name')->nullable();
             $table->string('email')->nullable();
             $table->string('company')->nullable();
+            $table->string('tag_list', 255)->nullable();
             $table->string('source', 64)->nullable();       // manual | import | inbound | campaign | api
             $table->foreignId('lead_status_id')->nullable()->constrained('lead_statuses')->nullOnDelete();
             $table->foreignId('assigned_agent_id')->nullable()->constrained('users')->nullOnDelete();

@@ -17,10 +17,26 @@ class Contact extends Model
     use BelongsToTenant, HasFactory, HasUuid, SoftDeletes, TracksBlame;
 
     protected $fillable = [
-        'tenant_id', 'wa_id', 'phone', 'name', 'email', 'company', 'tag_list', 'source',
-        'lead_status_id', 'assigned_agent_id', 'language', 'country',
-        'is_blocked', 'opted_out', 'last_interaction_at', 'meta',
-        'is_hot', 'hot_reason', 'hot_at', 'hot_source',
+        'tenant_id',
+        'wa_id',
+        'phone',
+        'name',
+        'email',
+        'company',
+        'tag_list',
+        'source',
+        'lead_status_id',
+        'assigned_agent_id',
+        'language',
+        'country',
+        'is_blocked',
+        'opted_out',
+        'last_interaction_at',
+        'meta',
+        'is_hot',
+        'hot_reason',
+        'hot_at',
+        'hot_source',
     ];
 
     // NOTE: tag_list is a plain varchar column (text), so it must NOT be cast to array
