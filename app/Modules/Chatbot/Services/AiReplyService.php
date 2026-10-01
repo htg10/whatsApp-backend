@@ -87,15 +87,17 @@ class AiReplyService
     /** @param array<int, array{role:string, content:string}> $messages */
     private function callGemini(string $system, array $messages): ?string
     {
-        $model = config('services.gemini.model', 'gemini-3.6-flash');
+        $model = config('services.gemini.model', 'gemini-3.8-flash');
         $contents = array_map(fn ($m) => [
             'role' => $m['role'] === 'assistant' ? 'model' : 'user',
             'parts' => [['text' => $m['content']]],
         ], $messages);
 
-        $res = Http::withHeaders(['x-goog-api-key' => config('services.gemini.key')])
-            ->timeout(30)
-            ->post(self::GEMINI_ENDPOINT . $model . ':generateContent', [
+        $apiKey = config('services.gemini.key');
+        $url = self::GEMINI_ENDPOINT . $model . ':generateContent?key=' . urlencode($apiKey);
+
+        $res = Http::timeout(30)
+            ->post($url, [
                 'system_instruction' => ['parts' => [['text' => $system]]],
                 'contents' => $contents,
                 'generationConfig' => ['maxOutputTokens' => 600, 'temperature' => 0.7],
