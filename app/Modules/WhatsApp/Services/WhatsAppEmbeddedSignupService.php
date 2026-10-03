@@ -53,18 +53,24 @@ class WhatsAppEmbeddedSignupService extends BaseService
             );
 
             foreach ($this->fetchPhoneNumbers($wabaId, $token) as $number) {
-                WhatsappPhoneNumber::withoutGlobalScopes()->updateOrCreate(
-                    ['phone_number_id' => $number['id']],
-                    [
-                        'tenant_id' => $tenantId,
-                        'whatsapp_business_account_id' => $waba->id,
-                        'display_phone_number' => $number['display_phone_number'] ?? '',
-                        'verified_name' => $number['verified_name'] ?? null,
-                        'quality_rating' => $number['quality_rating'] ?? null,
-                        'status' => 'connected',
-                        'is_default' => $number['id'] === $phoneNumberId,
-                    ],
-                );
+                $phone = WhatsappPhoneNumber::withoutGlobalScopes()
+                    ->withTrashed()
+                    ->updateOrCreate(
+                        ['phone_number_id' => $number['id']],
+                        [
+                            'tenant_id' => $tenantId,
+                            'whatsapp_business_account_id' => $waba->id,
+                            'display_phone_number' => $number['display_phone_number'] ?? '',
+                            'verified_name' => $number['verified_name'] ?? null,
+                            'quality_rating' => $number['quality_rating'] ?? null,
+                            'status' => 'connected',
+                            'is_default' => $number['id'] === $phoneNumberId,
+                        ],
+                    );
+
+                if ($phone->trashed()) {
+                    $phone->restore();
+                }
             }
 
             return $waba->load('phoneNumbers');
