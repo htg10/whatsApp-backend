@@ -53,7 +53,7 @@ class WhatsAppEmbeddedSignupService extends BaseService
             );
 
             foreach ($this->fetchPhoneNumbers($wabaId, $token) as $number) {
-                WhatsappPhoneNumber::updateOrCreate(
+                WhatsappPhoneNumber::withoutGlobalScopes()->updateOrCreate(
                     ['phone_number_id' => $number['id']],
                     [
                         'tenant_id' => $tenantId,
