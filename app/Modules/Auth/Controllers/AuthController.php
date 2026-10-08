@@ -11,6 +11,9 @@ use App\Modules\Auth\Requests\ResetPasswordRequest;
 use App\Modules\Auth\Resources\UserResource;
 use App\Modules\Auth\Services\AuthService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
@@ -62,6 +65,43 @@ class AuthController extends Controller
         $this->auth->resetPassword($request->only('email', 'password', 'password_confirmation', 'token'));
 
         return $this->ok(['message' => 'Password has been reset. You can now log in.']);
+    }
+
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+            'email' => ['sometimes', 'email', 'max:255', 'unique:users,email,' . $request->user()->id],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:32'],
+        ]);
+
+        $request->user()->update($data);
+
+        return $this->ok(['user' => new UserResource($request->user()->fresh()->load('tenant'))]);
+    }
+
+    public function changePassword(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($user->is_super_admin) {
+            $request->validate([
+                'password' => ['required', 'confirmed', Password::min(8)],
+            ]);
+        } else {
+            $request->validate([
+                'current_password' => ['required', 'string'],
+                'password' => ['required', 'confirmed', Password::min(8)],
+            ]);
+
+            if (! Hash::check($request->input('current_password'), $user->password)) {
+                return $this->fail('Current password is incorrect.', [], 422);
+            }
+        }
+
+        $user->update(['password' => $request->input('password')]);
+
+        return $this->ok(['message' => 'Password changed successfully.']);
     }
 
     /** Shape the {user, token, ...} service result for the API envelope. */

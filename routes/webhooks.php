@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Billing\Controllers\RazorpayWebhookController;
 use App\Modules\WhatsApp\Controllers\WhatsAppWebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -12,4 +13,5 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('webhooks')->group(function () {
     Route::get('/whatsapp', [WhatsAppWebhookController::class, 'verify']);
     Route::post('/whatsapp', [WhatsAppWebhookController::class, 'receive']);
+    Route::post('/razorpay', [RazorpayWebhookController::class, 'handle']);
 });

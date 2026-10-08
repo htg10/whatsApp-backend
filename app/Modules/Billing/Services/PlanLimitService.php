@@ -20,14 +20,32 @@ use Illuminate\Validation\ValidationException;
  */
 class PlanLimitService
 {
-    /** The tenant's current plan (via its latest subscription), or null. */
+    /** The tenant's current plan (via its latest subscription), or null if expired/absent. */
     public function planFor(int $tenantId): ?Plan
     {
-        return Subscription::withoutGlobalScopes()
+        $sub = Subscription::withoutGlobalScopes()
             ->where('tenant_id', $tenantId)
             ->latest('id')
             ->with('plan')
-            ->first()?->plan;
+            ->first();
+
+        if (! $sub) {
+            return null;
+        }
+
+        if (
+            in_array($sub->status, ['active', 'trialing'], true)
+            && $sub->current_period_end
+            && $sub->current_period_end->isPast()
+        ) {
+            $sub->update(['status' => 'expired']);
+        }
+
+        if (! in_array($sub->status, ['active', 'trialing'], true)) {
+            return null;
+        }
+
+        return $sub->plan;
     }
 
     /** Numeric limit for a key. null return = unlimited. */

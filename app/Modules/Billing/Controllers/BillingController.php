@@ -10,6 +10,7 @@ use App\Models\Subscription;
 use App\Models\Wallet;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Read-side billing for a tenant: current plan/subscription, wallet balance and
@@ -143,8 +144,11 @@ class BillingController extends Controller
         $key = config('services.razorpay.key');
         $secret = config('services.razorpay.secret');
         if (! $key || ! $secret) {
+            Log::warning('billing.order: Razorpay not configured');
             return $this->fail('Online payments are not configured. Please contact support.', [], 503);
         }
+
+        Log::info('billing.order: creating Razorpay order', ['plan' => $plan->name, 'total_paise' => $total, 'tenant' => $request->user()->tenant_id]);
 
         $response = \Illuminate\Support\Facades\Http::withBasicAuth($key, $secret)
             ->acceptJson()
@@ -157,8 +161,11 @@ class BillingController extends Controller
 
         if ($response->failed()) {
             $msg = data_get($response->json(), 'error.description', 'Could not create the payment order.');
+            Log::warning('billing.order: Razorpay failed', ['error' => $msg]);
             return $this->fail('Razorpay: ' . $msg, [], 502);
         }
+
+        Log::info('billing.order: order created', ['order_id' => $response->json('id')]);
 
         return $this->ok([
             'free' => false,
@@ -192,13 +199,18 @@ class BillingController extends Controller
         $expected = hash_hmac('sha256', $data['razorpay_order_id'] . '|' . $data['razorpay_payment_id'], (string) $secret);
 
         if (! hash_equals($expected, $data['razorpay_signature'])) {
+            Log::warning('billing.verify: signature mismatch', ['order_id' => $data['razorpay_order_id']]);
             return $this->fail('Payment verification failed. If money was deducted it will be refunded automatically.', [], 422);
         }
+
+        Log::info('billing.verify: signature valid, applying plan', ['payment_id' => $data['razorpay_payment_id'], 'tenant' => $request->user()->tenant_id]);
 
         $plan = Plan::where('uuid', $data['plan_id'])->where('is_active', true)->firstOrFail();
         [$base, $rate, $tax, $total] = $this->amounts($plan);
         $subscription = $this->applyPlan($plan, $request->user()->tenant_id);
         $invoice = $this->generateInvoice($subscription, $plan, $data['billing'], $base, $rate, $tax, $total, 'paid', $data['razorpay_payment_id']);
+
+        Log::info('billing.verify: plan activated', ['plan' => $plan->name, 'subscription_id' => $subscription->id]);
 
         return $this->ok([
             'message' => 'Payment successful — your plan is now active.',

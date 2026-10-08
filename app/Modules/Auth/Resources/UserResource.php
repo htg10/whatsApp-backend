@@ -57,9 +57,18 @@ class UserResource extends JsonResource
             return null;
         }
 
+        if (
+            in_array($sub->status, ['active', 'trialing'], true)
+            && $sub->current_period_end
+            && $sub->current_period_end->isPast()
+        ) {
+            $sub->update(['status' => 'expired']);
+        }
+
         return [
             'status' => $sub->status,
             'plan_name' => $sub->plan?->name,
+            'current_period_end' => $sub->current_period_end?->toIso8601String(),
         ];
     }
 }
