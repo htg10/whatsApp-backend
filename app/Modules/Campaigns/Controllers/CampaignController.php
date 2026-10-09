@@ -179,78 +179,87 @@ class CampaignController extends Controller
             'started_at' => now(),
         ]);
 
-        $phone = $campaign->phoneNumber;
-        $template = $campaign->template;
+        $campaignId = $campaign->id;
+        $messages = $this->messages;
 
-        $pendingContacts = $campaign->campaignContacts()
-            ->where('status', 'pending')
-            ->with('contact')
-            ->get();
+        dispatch(function () use ($campaignId, $messages) {
+            set_time_limit(0);
+            ignore_user_abort(true);
 
-        $sentCount = $campaign->sent_count;
-        $failedCount = $campaign->failed_count;
+            $campaign = Campaign::with(['template', 'phoneNumber'])->find($campaignId);
+            if (! $campaign) return;
 
-        foreach ($pendingContacts as $campaignContact) {
-            // Check if campaign was paused during sending
+            $phone = $campaign->phoneNumber;
+            $template = $campaign->template;
+
+            $pendingContacts = $campaign->campaignContacts()
+                ->where('status', 'pending')
+                ->with('contact')
+                ->get();
+
+            $sentCount = $campaign->sent_count;
+            $failedCount = $campaign->failed_count;
+
+            foreach ($pendingContacts as $campaignContact) {
+                $campaign->refresh();
+                if ($campaign->status !== 'running') {
+                    break;
+                }
+
+                try {
+                    $result = $messages->sendTemplate(
+                        $phone,
+                        $campaignContact->contact->phone,
+                        $template->name,
+                        $template->language,
+                    );
+
+                    $wamid = $messages->wamid($result);
+
+                    $campaignContact->update(['status' => 'sent']);
+
+                    \App\Models\CampaignMessage::create([
+                        'tenant_id' => $campaign->tenant_id,
+                        'campaign_id' => $campaign->id,
+                        'campaign_contact_id' => $campaignContact->id,
+                        'message_id' => null,
+                        'status' => 'sent',
+                        'attempts' => 1,
+                    ]);
+
+                    $sentCount++;
+                } catch (\Throwable $e) {
+                    $campaignContact->update(['status' => 'failed']);
+
+                    \App\Models\CampaignMessage::create([
+                        'tenant_id' => $campaign->tenant_id,
+                        'campaign_id' => $campaign->id,
+                        'campaign_contact_id' => $campaignContact->id,
+                        'message_id' => null,
+                        'status' => 'failed',
+                        'error_message' => Str::limit($e->getMessage(), 500),
+                        'attempts' => 1,
+                    ]);
+
+                    $failedCount++;
+                }
+
+                $campaign->update([
+                    'sent_count' => $sentCount,
+                    'failed_count' => $failedCount,
+                ]);
+
+                usleep(50000);
+            }
+
             $campaign->refresh();
-            if ($campaign->status !== 'running') {
-                break;
-            }
-
-            try {
-                $result = $this->messages->sendTemplate(
-                    $phone,
-                    $campaignContact->contact->phone,
-                    $template->name,
-                    $template->language,
-                );
-
-                $wamid = $this->messages->wamid($result);
-
-                $campaignContact->update(['status' => 'sent']);
-
-                \App\Models\CampaignMessage::create([
-                    'tenant_id' => $campaign->tenant_id,
-                    'campaign_id' => $campaign->id,
-                    'campaign_contact_id' => $campaignContact->id,
-                    'message_id' => null,
-                    'status' => 'sent',
-                    'attempts' => 1,
+            if ($campaign->status === 'running') {
+                $campaign->update([
+                    'status' => 'completed',
+                    'completed_at' => now(),
                 ]);
-
-                $sentCount++;
-            } catch (\Throwable $e) {
-                $campaignContact->update(['status' => 'failed']);
-
-                \App\Models\CampaignMessage::create([
-                    'tenant_id' => $campaign->tenant_id,
-                    'campaign_id' => $campaign->id,
-                    'campaign_contact_id' => $campaignContact->id,
-                    'message_id' => null,
-                    'status' => 'failed',
-                    'error_message' => Str::limit($e->getMessage(), 500),
-                    'attempts' => 1,
-                ]);
-
-                $failedCount++;
             }
-
-            $campaign->update([
-                'sent_count' => $sentCount,
-                'failed_count' => $failedCount,
-            ]);
-
-            usleep(50000);
-        }
-
-        // If we finished the loop without being paused, mark as completed
-        $campaign->refresh();
-        if ($campaign->status === 'running') {
-            $campaign->update([
-                'status' => 'completed',
-                'completed_at' => now(),
-            ]);
-        }
+        })->afterResponse();
 
         return $this->ok([
             'campaign' => new CampaignResource($campaign->fresh(['template', 'phoneNumber'])),

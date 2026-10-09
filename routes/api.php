@@ -39,5 +39,6 @@ Route::prefix('v1')->group(function () {
         require __DIR__ . '/modules/team.php';
         require __DIR__ . '/modules/social.php';
         require __DIR__ . '/modules/admin.php';
+        require __DIR__ . '/modules/support.php';
     });
 });

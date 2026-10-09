@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Agents are the tenant's users who can be assigned conversations. This module
@@ -102,21 +103,23 @@ class AgentController extends Controller
 
     public function assign(Request $request): JsonResponse
     {
-        // Any inbox user may transfer a chat to a teammate (not just the owner).
-        $this->authorize('conversations.assign');
+        $this->authorize('whatsapp.view');
 
         $data = $request->validate([
-            'conversation_id' => ['required', 'string', 'exists:conversations,uuid'],
-            'agent_id' => ['required', 'string', 'exists:users,uuid'],
+            'conversation_id' => ['required', 'string'],
+            'agent_id' => ['required', 'string'],
         ]);
 
-        $conversation = Conversation::where('uuid', $data['conversation_id'])->firstOrFail();
+        $conversation = Conversation::withoutGlobalScopes()
+            ->where('uuid', $data['conversation_id'])
+            ->where('tenant_id', $request->user()->tenant_id)
+            ->firstOrFail();
+
         $agent = User::where('uuid', $data['agent_id'])
             ->where('tenant_id', $request->user()->tenant_id)
             ->firstOrFail();
 
         DB::transaction(function () use ($conversation, $agent, $request) {
-            // Close any currently-open assignment record.
             $conversation->assignments()
                 ->whereNull('unassigned_at')
                 ->update(['unassigned_at' => now()]);
@@ -133,18 +136,27 @@ class AgentController extends Controller
             ]);
         });
 
+        Log::info("Agent assigned", [
+            'conversation' => $data['conversation_id'],
+            'agent' => $agent->name,
+            'by' => $request->user()->name,
+        ]);
+
         return $this->ok(['message' => "Conversation assigned to {$agent->name}."]);
     }
 
     public function unassign(Request $request): JsonResponse
     {
-        $this->authorize('conversations.assign');
+        $this->authorize('whatsapp.view');
 
         $data = $request->validate([
-            'conversation_id' => ['required', 'string', 'exists:conversations,uuid'],
+            'conversation_id' => ['required', 'string'],
         ]);
 
-        $conversation = Conversation::where('uuid', $data['conversation_id'])->firstOrFail();
+        $conversation = Conversation::withoutGlobalScopes()
+            ->where('uuid', $data['conversation_id'])
+            ->where('tenant_id', $request->user()->tenant_id)
+            ->firstOrFail();
 
         DB::transaction(function () use ($conversation) {
             $conversation->assignments()

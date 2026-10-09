@@ -68,40 +68,53 @@ class BulkSendService extends BaseService
             ]);
         }
 
-        $sentCount = 0;
-        $failedCount = 0;
+        $bulkSendId = $bulkSend->id;
+        $recipientIds = collect($recipients)->pluck('id')->all();
+        $messages = $this->messages;
 
-        foreach ($recipients as $recipient) {
-            try {
-                $result = $this->messages->sendTemplate($phone, $recipient->phone, $template, $language, $components);
-                $wamid = $this->messages->wamid($result);
-                $recipient->update([
-                    'status' => 'sent',
-                    'wamid' => $wamid,
-                    'sent_at' => now(),
-                ]);
-                $sentCount++;
-            } catch (\Throwable $e) {
-                // Prefer the user-friendly, actionable message (e.g. token expired)
-                // over Meta's raw technical text ("Authentication Error").
-                $msg = $e instanceof \App\Modules\WhatsApp\Exceptions\WhatsAppApiException
-                    ? $e->userMessage
-                    : $e->getMessage();
-                $recipient->update([
-                    'status' => 'failed',
-                    'error_message' => Str::limit($msg, 500),
-                ]);
-                $failedCount++;
+        dispatch(function () use ($bulkSendId, $recipientIds, $phone, $template, $language, $components, $messages) {
+            set_time_limit(0);
+            ignore_user_abort(true);
+
+            $sentCount = 0;
+            $failedCount = 0;
+
+            foreach ($recipientIds as $recipientId) {
+                $recipient = BulkSendRecipient::find($recipientId);
+                if (! $recipient) continue;
+
+                try {
+                    $result = $messages->sendTemplate($phone, $recipient->phone, $template, $language, $components);
+                    $wamid = $messages->wamid($result);
+                    $recipient->update([
+                        'status' => 'sent',
+                        'wamid' => $wamid,
+                        'sent_at' => now(),
+                    ]);
+                    $sentCount++;
+                } catch (\Throwable $e) {
+                    $msg = $e instanceof \App\Modules\WhatsApp\Exceptions\WhatsAppApiException
+                        ? $e->userMessage
+                        : $e->getMessage();
+                    $recipient->update([
+                        'status' => 'failed',
+                        'error_message' => Str::limit($msg, 500),
+                    ]);
+                    $failedCount++;
+                }
+
+                usleep(50000);
             }
 
-            usleep(50000);
-        }
-
-        $bulkSend->update([
-            'status' => $failedCount === count($recipients) ? 'failed' : 'completed',
-            'sent_count' => $sentCount,
-            'failed_count' => $failedCount,
-        ]);
+            $bs = BulkSend::find($bulkSendId);
+            if ($bs) {
+                $bs->update([
+                    'status' => $failedCount === count($recipientIds) ? 'failed' : 'completed',
+                    'sent_count' => $sentCount,
+                    'failed_count' => $failedCount,
+                ]);
+            }
+        })->afterResponse();
 
         return $bulkSend->fresh(['phoneNumber', 'recipients']);
     }
