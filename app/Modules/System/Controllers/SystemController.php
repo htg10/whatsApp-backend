@@ -24,7 +24,8 @@ class SystemController extends Controller
         if (! $expected) {
             return $this->fail('Deploy hook is disabled. Set DEPLOY_KEY in .env to enable it.', [], 403);
         }
-        if (! hash_equals($expected, (string) $request->query('key'))) {
+        $key = $request->header('X-Deploy-Key') ?: (string) $request->query('key');
+        if (! hash_equals($expected, $key)) {
             return $this->fail('Invalid deploy key.', [], 403);
         }
 

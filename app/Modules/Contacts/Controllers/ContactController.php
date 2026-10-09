@@ -19,12 +19,13 @@ class ContactController extends Controller
             ->orderByDesc('created_at');
 
         if ($search = $request->query('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('phone', 'like', "%{$search}%")
-                  ->orWhere('wa_id', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhere('tag_list', 'like', "%{$search}%");
+            $safe = '%' . $this->escapeLike($search) . '%';
+            $query->where(function ($q) use ($safe) {
+                $q->where('name', 'like', $safe)
+                  ->orWhere('phone', 'like', $safe)
+                  ->orWhere('wa_id', 'like', $safe)
+                  ->orWhere('email', 'like', $safe)
+                  ->orWhere('tag_list', 'like', $safe);
             });
         }
 

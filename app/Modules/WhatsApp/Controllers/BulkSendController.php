@@ -20,6 +20,12 @@ class BulkSendController extends Controller
             ->orderByDesc('created_at')
             ->paginate($request->integer('per_page', 20));
 
+        foreach ($sends->items() as $send) {
+            if ($this->service->claimIfStalled($send)) {
+                $this->service->continueAfterResponse($send);
+            }
+        }
+
         return $this->ok([
             'bulk_sends' => $sends->items(),
             'meta' => [
@@ -34,11 +40,13 @@ class BulkSendController extends Controller
     {
         $this->authorize('whatsapp.manage');
 
-        $send = BulkSend::where('uuid', $uuid)
-            ->with(['phoneNumber', 'recipients'])
-            ->firstOrFail();
+        $send = BulkSend::where('uuid', $uuid)->firstOrFail();
 
-        return $this->ok(['bulk_send' => $send]);
+        if ($this->service->claimIfStalled($send)) {
+            $this->service->continueAfterResponse($send);
+        }
+
+        return $this->ok(['bulk_send' => $send->load(['phoneNumber', 'recipients'])]);
     }
 
     public function store(Request $request): JsonResponse

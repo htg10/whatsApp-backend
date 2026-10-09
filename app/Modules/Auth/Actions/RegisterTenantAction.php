@@ -3,8 +3,6 @@
 namespace App\Modules\Auth\Actions;
 
 use App\Models\LeadStatus;
-use App\Models\Plan;
-use App\Models\Subscription;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Models\Wallet;
@@ -40,8 +38,7 @@ class RegisterTenantAction
                 'company_name' => $data->companyName,
                 'email' => $data->email,
                 'phone' => $data->phone,
-                'status' => 'trialing',
-                'trial_ends_at' => now()->addDays(14),
+                'status' => 'active',
             ]);
 
             $user = new User([
@@ -62,8 +59,9 @@ class RegisterTenantAction
 
             Wallet::create(['tenant_id' => $tenant->id, 'currency' => 'INR', 'balance_minor' => 0]);
 
+            // No subscription is created: the workspace stays locked until the
+            // owner buys a plan or a super admin assigns one.
             $this->seedLeadStatuses($tenant->id);
-            $this->startTrialSubscription($tenant);
 
             return $user;
         });
@@ -88,23 +86,5 @@ class RegisterTenantAction
                 'sort_order' => $i + 1,
             ]));
         }
-    }
-
-    private function startTrialSubscription(Tenant $tenant): void
-    {
-        $plan = Plan::where('slug', 'starter')->first() ?? Plan::orderBy('sort_order')->first();
-
-        if ($plan === null) {
-            return; // no catalog seeded yet; billing can be attached later
-        }
-
-        Subscription::create([
-            'tenant_id' => $tenant->id,
-            'plan_id' => $plan->id,
-            'status' => 'trialing',
-            'trial_ends_at' => now()->addDays($plan->trial_days ?: 14),
-            'current_period_start' => now(),
-            'current_period_end' => now()->addDays($plan->trial_days ?: 14),
-        ]);
     }
 }

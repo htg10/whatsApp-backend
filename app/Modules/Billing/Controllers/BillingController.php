@@ -44,8 +44,8 @@ class BillingController extends Controller
 
         $plans = Plan::where('is_active', true)
             ->where('is_public', true)
-            ->orderBy('sort_order')
             ->orderBy('price')
+            ->orderBy('sort_order')
             ->get();
 
         return $this->ok([

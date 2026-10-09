@@ -8,14 +8,13 @@ use App\Models\CampaignContact;
 use App\Models\Contact;
 use App\Models\WhatsappPhoneNumber;
 use App\Modules\Campaigns\Resources\CampaignResource;
-use App\Modules\WhatsApp\Services\WhatsAppMessageService;
+use App\Modules\Campaigns\Services\CampaignSendService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 
 class CampaignController extends Controller
 {
-    public function __construct(private readonly WhatsAppMessageService $messages) {}
+    public function __construct(private readonly CampaignSendService $sender) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -25,7 +24,7 @@ class CampaignController extends Controller
             ->orderByDesc('created_at');
 
         if ($search = $request->query('search')) {
-            $query->where('name', 'like', "%{$search}%");
+            $query->where('name', 'like', '%' . $this->escapeLike($search) . '%');
         }
 
         if ($status = $request->query('status')) {
@@ -33,6 +32,12 @@ class CampaignController extends Controller
         }
 
         $campaigns = $query->paginate($request->integer('per_page', 25));
+
+        foreach ($campaigns->items() as $campaign) {
+            if ($this->sender->claimIfStalled($campaign)) {
+                $this->sender->continueAfterResponse($campaign);
+            }
+        }
 
         return $this->ok([
             'campaigns' => CampaignResource::collection($campaigns),
@@ -51,6 +56,10 @@ class CampaignController extends Controller
         $campaign = Campaign::where('uuid', $uuid)
             ->with(['template', 'phoneNumber'])
             ->firstOrFail();
+
+        if ($this->sender->claimIfStalled($campaign)) {
+            $this->sender->continueAfterResponse($campaign);
+        }
 
         $contacts = $campaign->campaignContacts()
             ->with('contact:id,uuid,name,phone')
@@ -179,87 +188,10 @@ class CampaignController extends Controller
             'started_at' => now(),
         ]);
 
-        $campaignId = $campaign->id;
-        $messages = $this->messages;
-
-        dispatch(function () use ($campaignId, $messages) {
-            set_time_limit(0);
-            ignore_user_abort(true);
-
-            $campaign = Campaign::with(['template', 'phoneNumber'])->find($campaignId);
-            if (! $campaign) return;
-
-            $phone = $campaign->phoneNumber;
-            $template = $campaign->template;
-
-            $pendingContacts = $campaign->campaignContacts()
-                ->where('status', 'pending')
-                ->with('contact')
-                ->get();
-
-            $sentCount = $campaign->sent_count;
-            $failedCount = $campaign->failed_count;
-
-            foreach ($pendingContacts as $campaignContact) {
-                $campaign->refresh();
-                if ($campaign->status !== 'running') {
-                    break;
-                }
-
-                try {
-                    $result = $messages->sendTemplate(
-                        $phone,
-                        $campaignContact->contact->phone,
-                        $template->name,
-                        $template->language,
-                    );
-
-                    $wamid = $messages->wamid($result);
-
-                    $campaignContact->update(['status' => 'sent']);
-
-                    \App\Models\CampaignMessage::create([
-                        'tenant_id' => $campaign->tenant_id,
-                        'campaign_id' => $campaign->id,
-                        'campaign_contact_id' => $campaignContact->id,
-                        'message_id' => null,
-                        'status' => 'sent',
-                        'attempts' => 1,
-                    ]);
-
-                    $sentCount++;
-                } catch (\Throwable $e) {
-                    $campaignContact->update(['status' => 'failed']);
-
-                    \App\Models\CampaignMessage::create([
-                        'tenant_id' => $campaign->tenant_id,
-                        'campaign_id' => $campaign->id,
-                        'campaign_contact_id' => $campaignContact->id,
-                        'message_id' => null,
-                        'status' => 'failed',
-                        'error_message' => Str::limit($e->getMessage(), 500),
-                        'attempts' => 1,
-                    ]);
-
-                    $failedCount++;
-                }
-
-                $campaign->update([
-                    'sent_count' => $sentCount,
-                    'failed_count' => $failedCount,
-                ]);
-
-                usleep(50000);
-            }
-
-            $campaign->refresh();
-            if ($campaign->status === 'running') {
-                $campaign->update([
-                    'status' => 'completed',
-                    'completed_at' => now(),
-                ]);
-            }
-        })->afterResponse();
+        $this->sender->process($campaign, CampaignSendService::INLINE_SECONDS);
+        if ($campaign->fresh()?->status === 'running') {
+            $this->sender->continueAfterResponse($campaign);
+        }
 
         return $this->ok([
             'campaign' => new CampaignResource($campaign->fresh(['template', 'phoneNumber'])),

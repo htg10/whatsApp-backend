@@ -14,7 +14,15 @@ class BulkSend extends Model
 
     protected $fillable = [
         'tenant_id', 'whatsapp_phone_number_id', 'template_name',
-        'language', 'status', 'total', 'sent_count', 'failed_count', 'created_by',
+        'language', 'components', 'status', 'total', 'sent_count', 'failed_count', 'created_by',
+    ];
+
+    protected $casts = [
+        'components' => 'array',
+    ];
+
+    protected $hidden = [
+        'components',
     ];
 
     public function phoneNumber(): BelongsTo

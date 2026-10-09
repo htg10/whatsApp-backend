@@ -6,8 +6,7 @@ use App\Modules\Admin\Controllers\SettingsController;
 use Illuminate\Support\Facades\Route;
 
 // Platform super-admin: manage companies (tenants) and subscription plans.
-// Guarded inside the controllers by is_super_admin.
-Route::prefix('admin')->group(function () {
+Route::prefix('admin')->middleware('super_admin')->group(function () {
     Route::get('/companies', [CompanyController::class, 'index']);
     Route::post('/companies', [CompanyController::class, 'store']);
     Route::post('/companies/{uuid}/toggle', [CompanyController::class, 'toggle']);

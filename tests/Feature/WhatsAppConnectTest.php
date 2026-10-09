@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\Plan;
+use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WhatsappBusinessAccount;
 use App\Models\WhatsappPhoneNumber;
@@ -21,13 +23,53 @@ class WhatsAppConnectTest extends TestCase
         $this->seed(PlanSeeder::class);
     }
 
-    /** Register a tenant owner and return their bearer token. */
+    /** Register a tenant owner on an active plan and return their bearer token. */
     private function owner(string $email = 'owner@acme.test'): string
     {
-        return $this->postJson('/api/v1/auth/register', [
+        $token = $this->postJson('/api/v1/auth/register', [
             'company_name' => 'Acme', 'name' => 'Owner', 'email' => $email,
             'password' => 'Password123', 'password_confirmation' => 'Password123',
         ])->json('data.token');
+
+        Subscription::create([
+            'tenant_id' => User::withoutGlobalScopes()->where('email', $email)->value('tenant_id'),
+            'plan_id' => Plan::where('slug', 'enterprise')->value('id'),
+            'status' => 'active',
+            'current_period_start' => now(),
+            'current_period_end' => now()->addMonth(),
+        ]);
+
+        return $token;
+    }
+
+    public function test_tenant_without_a_plan_cannot_use_whatsapp(): void
+    {
+        $token = $this->postJson('/api/v1/auth/register', [
+            'company_name' => 'NoPlan', 'name' => 'Owner', 'email' => 'noplan@acme.test',
+            'password' => 'Password123', 'password_confirmation' => 'Password123',
+        ])->json('data.token');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/whatsapp/connect-manual', $this->payload())
+            ->assertStatus(403)
+            ->assertJsonPath('code', 'plan_required');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson('/api/v1/billing/plans')
+            ->assertOk();
+
+        $this->assertSame(0, WhatsappPhoneNumber::withoutGlobalScopes()->count());
+    }
+
+    public function test_expired_plan_blocks_whatsapp(): void
+    {
+        $token = $this->owner();
+        Subscription::withoutGlobalScopes()->update(['current_period_end' => now()->subDay()]);
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson('/api/v1/whatsapp/numbers')
+            ->assertStatus(403)
+            ->assertJsonPath('code', 'plan_required');
     }
 
     private function payload(array $overrides = []): array

@@ -29,7 +29,7 @@ class User extends Authenticatable implements JWTSubject
 
     protected $fillable = [
         'tenant_id', 'name', 'email', 'password', 'phone',
-        'avatar_url', 'is_super_admin', 'status', 'timezone',
+        'avatar_url', 'status', 'timezone',
         'email_verified_at', 'last_login_at',
         'google_id', 'google_refresh_token',
     ];

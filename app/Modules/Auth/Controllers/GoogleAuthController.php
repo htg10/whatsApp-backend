@@ -8,6 +8,7 @@ use App\Modules\Auth\Actions\RegisterTenantAction;
 use App\Modules\Auth\DTOs\RegisterData;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
@@ -37,6 +38,9 @@ class GoogleAuthController extends Controller
             return redirect($this->frontend('/login', ['google_error' => 'not_configured']));
         }
 
+        $state = Str::random(40);
+        Cache::put('google_oauth_state:' . $state, true, 600);
+
         $params = http_build_query([
             'client_id' => $clientId,
             'redirect_uri' => $redirect,
@@ -44,6 +48,7 @@ class GoogleAuthController extends Controller
             'scope' => self::SCOPES,
             'access_type' => 'offline',
             'prompt' => 'select_account',
+            'state' => $state,
         ]);
 
         return redirect('https://accounts.google.com/o/oauth2/v2/auth?' . $params);
@@ -53,6 +58,11 @@ class GoogleAuthController extends Controller
     {
         if ($request->has('error') || ! $request->filled('code')) {
             return redirect($this->frontend('/login', ['google_error' => 'cancelled']));
+        }
+
+        $state = $request->query('state');
+        if (! $state || ! Cache::pull('google_oauth_state:' . $state)) {
+            return redirect($this->frontend('/login', ['google_error' => 'invalid_state']));
         }
 
         $clientId = config('services.google.client_id');

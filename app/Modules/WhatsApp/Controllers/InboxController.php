@@ -33,9 +33,10 @@ class InboxController extends Controller
         }
 
         if ($search = $request->query('search')) {
-            $query->whereHas('contact', fn ($q) => $q->where('name', 'like', "%{$search}%")
-                ->orWhere('phone', 'like', "%{$search}%")
-                ->orWhere('wa_id', 'like', "%{$search}%"));
+            $safe = '%' . $this->escapeLike($search) . '%';
+            $query->whereHas('contact', fn ($q) => $q->where('name', 'like', $safe)
+                ->orWhere('phone', 'like', $safe)
+                ->orWhere('wa_id', 'like', $safe));
         }
 
         $conversations = $query->paginate($request->integer('per_page', 25));
@@ -141,7 +142,16 @@ class InboxController extends Controller
         'image' => ['image/jpeg', 'image/png', 'image/webp'],
         'video' => ['video/mp4', 'video/3gpp'],
         'audio' => ['audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr', 'audio/ogg', 'audio/opus'],
-        'document' => [],
+        'document' => [
+            'application/pdf', 'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-powerpoint',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'text/plain', 'text/csv',
+            'application/zip', 'application/x-zip-compressed',
+        ],
     ];
 
     public function sendMedia(Request $request, string $conversationUuid): JsonResponse

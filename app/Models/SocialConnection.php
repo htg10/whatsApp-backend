@@ -19,6 +19,7 @@ class SocialConnection extends Model
 
     protected $casts = [
         'meta' => 'array',
+        'page_access_token' => 'encrypted',
     ];
 
     protected $hidden = [

@@ -12,10 +12,11 @@ Route::prefix('v1')->group(function () {
     Route::get('/health', fn() => response()->json(['success' => true, 'data' => ['status' => 'ok']]));
 
     // Key-guarded post-deploy hook (no SSH needed): clears caches + migrates.
-    Route::get('/system/deploy', [\App\Modules\System\Controllers\SystemController::class, 'deploy']);
+    Route::match(['get', 'post'], '/system/deploy', [\App\Modules\System\Controllers\SystemController::class, 'deploy']);
 
     // Public media endpoint (UUID is unguessable, safe without auth)
-    Route::get('/whatsapp/media/{uuid}', [\App\Modules\WhatsApp\Controllers\InboxController::class, 'media']);
+    Route::get('/whatsapp/media/{uuid}', [\App\Modules\WhatsApp\Controllers\InboxController::class, 'media'])
+        ->middleware('throttle:60,1');
 
     // Auth module (public + auth:api-protected endpoints).
     require __DIR__ . '/modules/auth.php';
@@ -27,18 +28,22 @@ Route::prefix('v1')->group(function () {
             'data' => ['pong' => true, 'tenant_id' => auth()->user()->tenant_id],
         ]));
 
-        require __DIR__ . '/modules/whatsapp.php';
-        require __DIR__ . '/modules/contacts.php';
-        require __DIR__ . '/modules/templates.php';
-        require __DIR__ . '/modules/analytics.php';
-        require __DIR__ . '/modules/campaigns.php';
-        require __DIR__ . '/modules/automations.php';
-        require __DIR__ . '/modules/chatbot.php';
-        require __DIR__ . '/modules/agents.php';
+        // Reachable without an active plan, so a tenant can buy one or ask for help.
         require __DIR__ . '/modules/billing.php';
-        require __DIR__ . '/modules/team.php';
-        require __DIR__ . '/modules/social.php';
-        require __DIR__ . '/modules/admin.php';
         require __DIR__ . '/modules/support.php';
+        require __DIR__ . '/modules/admin.php';
+
+        Route::middleware('plan')->group(function () {
+            require __DIR__ . '/modules/whatsapp.php';
+            require __DIR__ . '/modules/contacts.php';
+            require __DIR__ . '/modules/templates.php';
+            require __DIR__ . '/modules/analytics.php';
+            require __DIR__ . '/modules/campaigns.php';
+            require __DIR__ . '/modules/automations.php';
+            require __DIR__ . '/modules/chatbot.php';
+            require __DIR__ . '/modules/agents.php';
+            require __DIR__ . '/modules/team.php';
+            require __DIR__ . '/modules/social.php';
+        });
     });
 });

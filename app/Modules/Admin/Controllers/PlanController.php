@@ -23,7 +23,7 @@ class PlanController extends Controller
     {
         $this->ensureSuperAdmin($request);
 
-        $plans = Plan::orderBy('sort_order')->orderBy('price')->get();
+        $plans = Plan::orderBy('price')->orderBy('sort_order')->get();
 
         return $this->ok([
             'plans' => $plans->map(fn (Plan $p) => $this->planArray($p)),

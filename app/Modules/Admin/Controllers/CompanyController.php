@@ -51,7 +51,7 @@ class CompanyController extends Controller
                     'created_at' => $t->created_at?->toIso8601String(),
                 ];
             }),
-            'plans' => Plan::where('is_active', true)->orderBy('sort_order')->orderBy('price')
+            'plans' => Plan::where('is_active', true)->orderBy('price')->orderBy('sort_order')
                 ->get()->map(fn (Plan $p) => ['id' => $p->uuid, 'name' => $p->name]),
         ]);
     }

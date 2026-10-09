@@ -11,3 +11,6 @@ Artisan::command('inspire', function () {
 // Publish scheduled Facebook/Instagram posts when their time arrives.
 // Requires Hostinger cron: * * * * * php /path/artisan schedule:run
 Schedule::command('social:publish-due')->everyMinute()->withoutOverlapping();
+
+// Finish bulk sends / campaigns whose web worker was killed mid-way.
+Schedule::command('whatsapp:resume-sends')->everyMinute()->withoutOverlapping(30);

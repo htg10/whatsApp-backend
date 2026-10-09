@@ -19,9 +19,10 @@ class SupportTicketController extends Controller
         }
 
         if ($search = $request->query('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('ticket_id', 'like', "%{$search}%")
-                  ->orWhere('subject', 'like', "%{$search}%");
+            $safe = '%' . $this->escapeLike($search) . '%';
+            $query->where(function ($q) use ($safe) {
+                $q->where('ticket_id', 'like', $safe)
+                  ->orWhere('subject', 'like', $safe);
             });
         }
 
@@ -114,9 +115,10 @@ class SupportTicketController extends Controller
         }
 
         if ($search = $request->query('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('ticket_id', 'like', "%{$search}%")
-                  ->orWhere('subject', 'like', "%{$search}%");
+            $safe = '%' . $this->escapeLike($search) . '%';
+            $query->where(function ($q) use ($safe) {
+                $q->where('ticket_id', 'like', $safe)
+                  ->orWhere('subject', 'like', $safe);
             });
         }
 

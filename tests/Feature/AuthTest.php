@@ -37,7 +37,7 @@ class AuthTest extends TestCase
         ], $overrides);
     }
 
-    public function test_register_provisions_tenant_owner_role_wallet_and_trial(): void
+    public function test_register_provisions_tenant_owner_role_and_wallet_without_a_plan(): void
     {
         $res = $this->postJson('/api/v1/auth/register', $this->registerPayload());
 
@@ -56,7 +56,7 @@ class AuthTest extends TestCase
 
         $this->assertSame(1, Wallet::withoutGlobalScopes()->where('tenant_id', $tenant->id)->count());
         $this->assertSame(5, LeadStatus::withoutGlobalScopes()->where('tenant_id', $tenant->id)->count());
-        $this->assertSame('trialing', Subscription::withoutGlobalScopes()->where('tenant_id', $tenant->id)->first()->status);
+        $this->assertSame(0, Subscription::withoutGlobalScopes()->where('tenant_id', $tenant->id)->count());
     }
 
     public function test_register_rejects_duplicate_email(): void

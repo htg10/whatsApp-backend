@@ -120,7 +120,8 @@ class WhatsAppWebhookController
     {
         $secrets = $this->getAllAppSecrets();
         if (empty($secrets)) {
-            return true;
+            Log::warning('webhook: no META_APP_SECRET configured, rejecting request');
+            return false;
         }
 
         $signature = $request->header('X-Hub-Signature-256');
