@@ -8,7 +8,8 @@ use Illuminate\Support\Facades\Route;
 | behind auth:api + the EnsureTenant middleware.
 */
 
-Route::prefix('v1')->group(function () {
+// Meta/Razorpay webhooks live in routes/webhooks.php and are deliberately not throttled.
+Route::prefix('v1')->middleware('throttle:api')->group(function () {
     Route::get('/health', fn() => response()->json(['success' => true, 'data' => ['status' => 'ok']]));
 
     // Key-guarded post-deploy hook (no SSH needed): clears caches + migrates.

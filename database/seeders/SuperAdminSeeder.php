@@ -23,7 +23,7 @@ class SuperAdminSeeder extends Seeder
         $email = env('SUPER_ADMIN_EMAIL', 'admin@example.com');
 
         $admin = User::withoutGlobalScopes()->firstOrNew(['email' => $email, 'tenant_id' => null]);
-        $admin->fill([
+        $admin->forceFill([
             'name' => env('SUPER_ADMIN_NAME', 'Super Admin'),
             'is_super_admin' => true,
             'status' => 'active',

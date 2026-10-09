@@ -29,9 +29,6 @@ return Application::configure(basePath: dirname(__DIR__))
             'super_admin' => \App\Http\Middleware\EnsureSuperAdmin::class,
             'plan' => \App\Http\Middleware\EnsureActivePlan::class,
         ]);
-        $middleware->api(prepend: [
-            \Illuminate\Routing\Middleware\ThrottleRequests::class . ':120,1',
-        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Every API error speaks the same envelope: { success:false, message, errors? }
