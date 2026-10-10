@@ -12,3 +12,4 @@
 /storage/framework/sessions/*
 !/storage/framework/sessions/.gitkeep
 /bootstrap/cache/*.php
+/storage/logs/*.log
