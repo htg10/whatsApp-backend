@@ -62,10 +62,35 @@ class BulkSendController extends Controller
             // every recipient (bulk send is one message to many numbers).
             'variables' => ['nullable', 'array', 'max:20'],
             'variables.*' => ['nullable', 'string', 'max:1024'],
+            // Public URL for templates whose HEADER is an image/video/document.
+            'header_media_url' => ['nullable', 'url', 'max:2048'],
         ]);
 
-        // Build the Meta template "components" payload for body variables.
         $components = [];
+
+        // A media HEADER (image/video/document) must be supplied at send time, or
+        // Meta rejects every message — the cause of "request could not be completed".
+        $headerFormat = $this->templateHeaderFormat(
+            $request->user()->tenant_id, $data['template'], $data['language'] ?? null
+        );
+        if (in_array($headerFormat, ['IMAGE', 'VIDEO', 'DOCUMENT'], true)) {
+            if (empty($data['header_media_url'])) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'header_media_url' => ['This template has an ' . strtolower($headerFormat)
+                        . ' header. Please provide a public ' . strtolower($headerFormat) . ' URL to send it.'],
+                ]);
+            }
+            $mediaKey = strtolower($headerFormat); // image | video | document
+            $components[] = [
+                'type' => 'header',
+                'parameters' => [[
+                    'type' => $mediaKey,
+                    $mediaKey => ['link' => $data['header_media_url']],
+                ]],
+            ];
+        }
+
+        // Build the Meta template "components" payload for body variables.
         $variables = $data['variables'] ?? [];
         if (! empty($variables)) {
             $components[] = [
@@ -87,5 +112,24 @@ class BulkSendController extends Controller
         );
 
         return $this->ok(['bulk_send' => $result], 201);
+    }
+
+    /** HEADER format (TEXT/IMAGE/VIDEO/DOCUMENT) of a template, or null if none. */
+    private function templateHeaderFormat(int $tenantId, string $name, ?string $language): ?string
+    {
+        $template = \App\Models\Template::withoutGlobalScopes()
+            ->where('tenant_id', $tenantId)
+            ->where('name', $name)
+            ->when($language, fn ($q) => $q->where('language', $language))
+            ->with('components')
+            ->first();
+
+        if (! $template) {
+            return null;
+        }
+
+        $header = $template->components->firstWhere('type', 'HEADER');
+
+        return $header?->format ? strtoupper($header->format) : null;
     }
 }

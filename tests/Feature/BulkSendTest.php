@@ -6,7 +6,10 @@ use App\Models\BulkSend;
 use App\Models\BulkSendRecipient;
 use App\Models\Plan;
 use App\Models\Subscription;
+use App\Models\Template;
+use App\Models\TemplateComponent;
 use App\Models\User;
+use App\Models\WhatsappBusinessAccount;
 use App\Models\WhatsappPhoneNumber;
 use Database\Seeders\PlanSeeder;
 use Database\Seeders\RolePermissionSeeder;
@@ -126,5 +129,56 @@ class BulkSendTest extends TestCase
 
         $this->assertSame('processing', $send->fresh()->status);
         $this->assertSame('pending', BulkSendRecipient::where('bulk_send_id', $send->id)->value('status'));
+    }
+
+    /** Create an APPROVED template whose HEADER is an image. */
+    private function imageHeaderTemplate(string $name, string $lang): void
+    {
+        $waba = WhatsappBusinessAccount::withoutGlobalScopes()->firstOrFail();
+        $tpl = Template::create([
+            'tenant_id' => $waba->tenant_id,
+            'whatsapp_business_account_id' => $waba->id,
+            'name' => $name, 'language' => $lang, 'category' => 'MARKETING', 'status' => 'APPROVED',
+        ]);
+        TemplateComponent::create([
+            'tenant_id' => $waba->tenant_id, 'template_id' => $tpl->id,
+            'type' => 'HEADER', 'format' => 'IMAGE', 'sort_order' => 0,
+        ]);
+    }
+
+    public function test_image_header_template_without_a_url_is_rejected(): void
+    {
+        $this->imageHeaderTemplate('promo_img', 'en_US');
+
+        $this->authed()->postJson('/api/v1/whatsapp/bulk-send', [
+            'numbers' => ['+91 98765 43210'],
+            'template' => 'promo_img',
+            'language' => 'en_US',
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('header_media_url');
+
+        $this->assertSame(0, BulkSend::withoutGlobalScopes()->count());
+    }
+
+    public function test_image_header_template_sends_with_a_url(): void
+    {
+        $this->imageHeaderTemplate('promo_img', 'en_US');
+
+        $this->authed()->postJson('/api/v1/whatsapp/bulk-send', [
+            'numbers' => ['+91 98765 43210'],
+            'template' => 'promo_img',
+            'language' => 'en_US',
+            'header_media_url' => 'https://example.com/banner.jpg',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.bulk_send.status', 'completed')
+            ->assertJsonPath('data.bulk_send.sent_count', 1);
+
+        // The image header component is built and persisted for the send.
+        $send = BulkSend::withoutGlobalScopes()->latest('id')->first();
+        $this->assertSame('header', $send->components[0]['type']);
+        $this->assertSame('image', $send->components[0]['parameters'][0]['type']);
+        $this->assertSame('https://example.com/banner.jpg', $send->components[0]['parameters'][0]['image']['link']);
     }
 }
