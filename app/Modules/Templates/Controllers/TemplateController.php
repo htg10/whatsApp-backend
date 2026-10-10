@@ -16,7 +16,7 @@ class TemplateController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.view');
+        $this->authorize('templates.view');
 
         $query = Template::with('businessAccount')->orderBy('name');
 
@@ -46,7 +46,7 @@ class TemplateController extends Controller
 
     public function show(string $uuid): JsonResponse
     {
-        $this->authorize('whatsapp.view');
+        $this->authorize('templates.view');
 
         $template = Template::where('uuid', $uuid)
             ->with(['businessAccount', 'components'])
@@ -62,7 +62,7 @@ class TemplateController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.manage');
+        $this->authorize('templates.create');
 
         $data = $request->validate([
             'name' => ['required', 'string', 'max:512', 'regex:/^[a-z0-9_]+$/'],
@@ -146,7 +146,7 @@ class TemplateController extends Controller
 
     public function destroy(Request $request, string $uuid): JsonResponse
     {
-        $this->authorize('whatsapp.manage');
+        $this->authorize('templates.delete');
 
         $template = Template::where('uuid', $uuid)->with('businessAccount')->firstOrFail();
 
@@ -209,7 +209,7 @@ class TemplateController extends Controller
 
     public function sync(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.manage');
+        $this->authorize('templates.sync');
 
         $tenantId = $request->user()->tenant_id;
         $accounts = WhatsappBusinessAccount::where('tenant_id', $tenantId)->get();

@@ -17,7 +17,7 @@ class AnalyticsController extends Controller
 {
     public function dashboard(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.view');
+        $this->authorize('analytics.view');
 
         $today = Carbon::now()->startOfDay();
         $weekAgo = Carbon::now()->subDays(7);
@@ -44,7 +44,7 @@ class AnalyticsController extends Controller
 
     public function messageStats(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.view');
+        $this->authorize('analytics.view');
 
         $days = min((int) $request->query('days', 30), 90);
         $startDate = Carbon::now()->subDays($days)->startOfDay();
@@ -87,7 +87,7 @@ class AnalyticsController extends Controller
 
     public function campaignStats(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.view');
+        $this->authorize('analytics.view');
 
         $campaigns = Campaign::orderByDesc('created_at')
             ->limit(20)

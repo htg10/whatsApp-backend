@@ -21,7 +21,7 @@ class InboxController extends Controller
 
     public function conversations(Request $request): JsonResponse
     {
-        $this->authorize('whatsapp.view');
+        $this->authorize('conversations.view');
 
         $query = Conversation::with(['contact', 'phoneNumber', 'assignedAgent'])
             // AI-selected hot leads first (highest priority score on top), then newest chats.
@@ -53,7 +53,7 @@ class InboxController extends Controller
 
     public function messages(Request $request, string $conversationUuid): JsonResponse
     {
-        $this->authorize('whatsapp.view');
+        $this->authorize('conversations.view');
 
         $conversation = Conversation::where('uuid', $conversationUuid)->firstOrFail();
 
@@ -71,7 +71,7 @@ class InboxController extends Controller
 
     public function markRead(Request $request, string $conversationUuid): JsonResponse
     {
-        $this->authorize('whatsapp.view');
+        $this->authorize('conversations.view');
 
         $conversation = Conversation::where('uuid', $conversationUuid)->firstOrFail();
         $conversation->update(['unread_count' => 0]);
@@ -81,7 +81,7 @@ class InboxController extends Controller
 
     public function send(Request $request, string $conversationUuid): JsonResponse
     {
-        $this->authorize('whatsapp.manage');
+        $this->authorize('conversations.reply');
 
         $conversation = Conversation::where('uuid', $conversationUuid)
             ->with(['contact', 'phoneNumber'])
@@ -156,7 +156,7 @@ class InboxController extends Controller
 
     public function sendMedia(Request $request, string $conversationUuid): JsonResponse
     {
-        $this->authorize('whatsapp.manage');
+        $this->authorize('conversations.reply');
 
         $conversation = Conversation::where('uuid', $conversationUuid)
             ->with(['contact', 'phoneNumber'])
