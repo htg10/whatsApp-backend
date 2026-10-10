@@ -19,6 +19,25 @@ class InboxController extends Controller
 {
     public function __construct(private readonly WhatsAppMessageService $messages) {}
 
+    /**
+     * Agents (no conversations.assign) only work the chats assigned to them;
+     * owners/managers, who can hand chats out, see every conversation.
+     */
+    private function seesOnlyAssigned(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ! $user->is_super_admin && ! $user->can('conversations.assign');
+    }
+
+    /** Block an agent from reaching a conversation that is not theirs. */
+    private function guardConversationAccess(Conversation $conversation): void
+    {
+        if ($this->seesOnlyAssigned() && $conversation->assigned_agent_id !== auth()->id()) {
+            abort(403, 'This conversation is not assigned to you.');
+        }
+    }
+
     public function conversations(Request $request): JsonResponse
     {
         $this->authorize('conversations.view');
@@ -27,6 +46,10 @@ class InboxController extends Controller
             // AI-selected hot leads first (highest priority score on top), then newest chats.
             ->orderByRaw('(SELECT ' . Contact::hotPrioritySql('hc') . ' FROM contacts hc WHERE hc.id = conversations.contact_id LIMIT 1) DESC')
             ->orderByDesc('last_message_at');
+
+        if ($this->seesOnlyAssigned()) {
+            $query->where('assigned_agent_id', auth()->id());
+        }
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);
@@ -56,6 +79,7 @@ class InboxController extends Controller
         $this->authorize('conversations.view');
 
         $conversation = Conversation::where('uuid', $conversationUuid)->firstOrFail();
+        $this->guardConversationAccess($conversation);
 
         $messages = $conversation->messages()
             ->with(['sender', 'attachments'])
@@ -74,6 +98,7 @@ class InboxController extends Controller
         $this->authorize('conversations.view');
 
         $conversation = Conversation::where('uuid', $conversationUuid)->firstOrFail();
+        $this->guardConversationAccess($conversation);
         $conversation->update(['unread_count' => 0]);
 
         return $this->ok(['message' => 'Conversation marked as read.']);
@@ -86,6 +111,7 @@ class InboxController extends Controller
         $conversation = Conversation::where('uuid', $conversationUuid)
             ->with(['contact', 'phoneNumber'])
             ->firstOrFail();
+        $this->guardConversationAccess($conversation);
 
         $data = $request->validate([
             'type' => ['nullable', 'in:text,template'],
@@ -161,6 +187,7 @@ class InboxController extends Controller
         $conversation = Conversation::where('uuid', $conversationUuid)
             ->with(['contact', 'phoneNumber'])
             ->firstOrFail();
+        $this->guardConversationAccess($conversation);
 
         if (! $conversation->windowIsOpen()) {
             return $this->fail('The 24-hour messaging window has expired. Send a template message to re-open the conversation.', 422);
@@ -241,6 +268,7 @@ class InboxController extends Controller
         $this->authorize('whatsapp.manage');
 
         $conversation = Conversation::where('uuid', $conversationUuid)->firstOrFail();
+        $this->guardConversationAccess($conversation);
         $message = $conversation->messages()->where('uuid', $messageUuid)->firstOrFail();
 
         $message->attachments()->delete();
