@@ -10,6 +10,7 @@ use App\Models\Message;
 use App\Models\WhatsappPhoneNumber;
 use App\Modules\WhatsApp\Services\WhatsAppMessageService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -30,14 +31,21 @@ class ChatbotEngine
         Contact $contact,
         Conversation $conversation,
         string $type,
-        ?string $body
+        ?string $body,
+        ?Message $message = null
     ): void {
-        // Only auto-reply to plain text, and never when a human agent is handling.
-        if ($type !== 'text' || ! $body) {
-            return;
-        }
         if ($conversation->assigned_agent_id) {
             Log::info('chatbot: skipped — chat is assigned to an agent', ['conversation' => $conversation->id]);
+            return;
+        }
+
+        // Handle plain text, and images/PDFs (which the AI can read). Other media
+        // types (audio, video, stickers, location) are ignored.
+        $isMedia = in_array($type, ['image', 'document'], true);
+        if ($type !== 'text' && ! $isMedia) {
+            return;
+        }
+        if ($type === 'text' && ! $body) {
             return;
         }
 
@@ -56,20 +64,25 @@ class ChatbotEngine
             return;
         }
 
-        $rules = ChatbotRule::withoutGlobalScopes()
-            ->where('chatbot_id', $chatbot->id)
-            ->where('is_active', true)
-            ->orderBy('priority')
-            ->get();
-
-        $matched = $rules->first(fn (ChatbotRule $rule) => $this->matches($rule, $body));
-
         $to = $contact->wa_id ?: ltrim((string) $contact->phone, '+');
         if (! $to) {
             return;
         }
 
         try {
+            if ($isMedia) {
+                $this->handleMedia($phone, $to, $chatbot, $conversation, $contact, $message, $body);
+                return;
+            }
+
+            $rules = ChatbotRule::withoutGlobalScopes()
+                ->where('chatbot_id', $chatbot->id)
+                ->where('is_active', true)
+                ->orderBy('priority')
+                ->get();
+
+            $matched = $rules->first(fn (ChatbotRule $rule) => $this->matches($rule, $body));
+
             if ($matched) {
                 Log::info('chatbot: rule matched', ['chatbot' => $chatbot->id, 'keyword' => $matched->keyword]);
                 $this->sendResponse($phone, $to, $matched, $conversation, $contact);
@@ -91,6 +104,70 @@ class ChatbotEngine
             }
         } catch (\Throwable $e) {
             Log::warning('Chatbot auto-reply failed: ' . $e->getMessage(), ['chatbot' => $chatbot->id]);
+        }
+    }
+
+    /** Let the AI look at an inbound image/PDF and reply about it. */
+    private function handleMedia(
+        WhatsappPhoneNumber $phone,
+        string $to,
+        Chatbot $chatbot,
+        Conversation $conversation,
+        Contact $contact,
+        ?Message $message,
+        ?string $caption
+    ): void {
+        if (! $chatbot->ai_enabled) {
+            if ($chatbot->fallback_message) {
+                $this->replyText($phone, $to, $chatbot->fallback_message, $conversation, $contact);
+            }
+            return;
+        }
+
+        $media = $message ? $this->readMedia($message) : null;
+        $aiReply = $media
+            ? $this->ai->describeMedia($chatbot, $caption, $media['bytes'], $media['mime'])
+            : null;
+
+        if ($aiReply) {
+            Log::info('chatbot: AI replied to media', ['chatbot' => $chatbot->id]);
+            $this->replyText($phone, $to, $aiReply, $conversation, $contact);
+        } elseif ($chatbot->fallback_message) {
+            Log::warning('chatbot: AI could not read media — sending fallback', ['chatbot' => $chatbot->id]);
+            $this->replyText($phone, $to, $chatbot->fallback_message, $conversation, $contact);
+        } else {
+            Log::warning('chatbot: AI could not read media and no fallback set', ['chatbot' => $chatbot->id]);
+        }
+    }
+
+    /**
+     * Read a stored inbound attachment's bytes + mime, for images and PDFs only
+     * and under a 5 MB cap. Returns null when there is nothing usable.
+     *
+     * @return array{bytes:string, mime:string}|null
+     */
+    private function readMedia(Message $message): ?array
+    {
+        $att = $message->attachments()->first();
+        if (! $att || ! $att->storage_path) {
+            return null;
+        }
+
+        $mime = (string) $att->mime_type;
+        if (! str_starts_with($mime, 'image/') && $mime !== 'application/pdf') {
+            return null;
+        }
+
+        try {
+            $disk = Storage::disk($att->storage_disk ?: 'local');
+            if (! $disk->exists($att->storage_path) || $disk->size($att->storage_path) > 5 * 1024 * 1024) {
+                return null;
+            }
+
+            return ['bytes' => $disk->get($att->storage_path), 'mime' => $mime];
+        } catch (\Throwable $e) {
+            Log::warning('chatbot: failed to read media attachment: ' . $e->getMessage());
+            return null;
         }
     }
 

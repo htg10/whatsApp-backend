@@ -65,6 +65,43 @@ class AiReplyService
         }
     }
 
+    /**
+     * Look at an image or PDF the customer sent and answer about it, using the
+     * business instructions as context. Returns null when AI is unavailable, the
+     * media type is unsupported, or the call fails.
+     */
+    public function describeMedia(Chatbot $chatbot, ?string $caption, string $bytes, string $mime): ?string
+    {
+        $provider = $this->resolveProvider();
+        if ($provider === null) {
+            return null;
+        }
+
+        // Only images and PDFs can be understood visually.
+        if (! str_starts_with($mime, 'image/') && $mime !== 'application/pdf') {
+            return null;
+        }
+
+        $system = $this->systemPrompt($chatbot) . "\n\n"
+            . "The customer has sent a file (an image or a PDF). Look at it carefully and respond helpfully, "
+            . "in line with the business information above. If it is a bill, invoice, receipt, screenshot or photo, "
+            . "you may read the visible details and answer about them. If you cannot read it clearly, say so politely "
+            . "and ask the customer to resend or clarify. Never invent details that are not visible in the file.";
+
+        $question = trim((string) $caption) !== ''
+            ? trim((string) $caption)
+            : 'Please look at the attached file and tell me what it is about, and help me with it.';
+
+        try {
+            return $provider === 'gemini'
+                ? $this->callGeminiVision($system, $question, $bytes, $mime)
+                : $this->callAnthropicVision($system, $question, $bytes, $mime);
+        } catch (\Throwable $e) {
+            Log::warning('AI media request failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
     /** Which provider to use: explicit config, else auto-detect by available key. */
     private function resolveProvider(): ?string
     {
@@ -111,6 +148,68 @@ class AiReplyService
         $text = $res->json('candidates.0.content.parts.0.text');
 
         return $text ? trim($text) : null;
+    }
+
+    private function callGeminiVision(string $system, string $question, string $bytes, string $mime): ?string
+    {
+        $model = config('services.gemini.model', 'gemini-1.5-flash');
+        $apiKey = config('services.gemini.key');
+        $url = self::GEMINI_ENDPOINT . $model . ':generateContent?key=' . urlencode($apiKey);
+
+        $res = Http::timeout(45)->post($url, [
+            'system_instruction' => ['parts' => [['text' => $system]]],
+            'contents' => [[
+                'role' => 'user',
+                'parts' => [
+                    ['text' => $question],
+                    ['inline_data' => ['mime_type' => $mime, 'data' => base64_encode($bytes)]],
+                ],
+            ]],
+            'generationConfig' => ['maxOutputTokens' => 700, 'temperature' => 0.5],
+        ]);
+
+        if ($res->failed()) {
+            Log::warning('Gemini vision API error', ['status' => $res->status(), 'body' => $res->json('error.message')]);
+            return null;
+        }
+
+        $text = $res->json('candidates.0.content.parts.0.text');
+
+        return $text ? trim($text) : null;
+    }
+
+    private function callAnthropicVision(string $system, string $question, string $bytes, string $mime): ?string
+    {
+        $media = $mime === 'application/pdf'
+            ? ['type' => 'document', 'source' => ['type' => 'base64', 'media_type' => 'application/pdf', 'data' => base64_encode($bytes)]]
+            : ['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => $mime, 'data' => base64_encode($bytes)]];
+
+        $res = Http::withHeaders([
+            'x-api-key' => config('services.anthropic.key'),
+            'anthropic-version' => '2023-06-01',
+            'content-type' => 'application/json',
+        ])->timeout(45)->post(self::ANTHROPIC_ENDPOINT, [
+            'model' => config('services.anthropic.model', 'claude-opus-5'),
+            'max_tokens' => 700,
+            'system' => $system,
+            'messages' => [[
+                'role' => 'user',
+                'content' => [['type' => 'text', 'text' => $question], $media],
+            ]],
+        ]);
+
+        if ($res->failed()) {
+            Log::warning('Anthropic vision API error', ['status' => $res->status(), 'body' => $res->json('error.message')]);
+            return null;
+        }
+
+        foreach ($res->json('content', []) as $block) {
+            if (($block['type'] ?? '') === 'text' && ! empty(trim($block['text'] ?? ''))) {
+                return trim($block['text']);
+            }
+        }
+
+        return null;
     }
 
     /** @param array<int, array{role:string, content:string}> $messages */

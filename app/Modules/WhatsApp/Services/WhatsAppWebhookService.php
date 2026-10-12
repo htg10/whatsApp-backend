@@ -158,7 +158,7 @@ class WhatsAppWebhookService extends BaseService
         // Chatbot auto-reply (best-effort — never blocks message intake).
         try {
             app(\App\Modules\Chatbot\Services\ChatbotEngine::class)
-                ->handleInbound($phone, $contact, $conversation->fresh(), $msgType, $body);
+                ->handleInbound($phone, $contact, $conversation->fresh(), $msgType, $body, $message->fresh('attachments'));
         } catch (\Throwable $e) {
             $this->log($event, 'warning', 'chatbot.failed', 'Chatbot auto-reply error: ' . $e->getMessage());
         }
