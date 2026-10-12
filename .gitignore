@@ -11,5 +11,6 @@
 !/storage/framework/views/.gitkeep
 /storage/framework/sessions/*
 !/storage/framework/sessions/.gitkeep
+/storage/framework/testing
 /bootstrap/cache/*.php
 /storage/logs/*.log
