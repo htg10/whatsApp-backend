@@ -33,6 +33,7 @@ Route::prefix('v1')->middleware('throttle:api')->group(function () {
         require __DIR__ . '/modules/billing.php';
         require __DIR__ . '/modules/support.php';
         require __DIR__ . '/modules/admin.php';
+        require __DIR__ . '/modules/devices.php';
 
         Route::middleware('plan')->group(function () {
             require __DIR__ . '/modules/assistant.php';

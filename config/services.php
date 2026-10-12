@@ -56,6 +56,11 @@ return [
         'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
     ],
 
+    // Mobile push. Expo needs no key; legacy FCM needs FCM_SERVER_KEY.
+    'fcm' => [
+        'key' => env('FCM_SERVER_KEY'),
+    ],
+
     'google' => [
         'client_id'     => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),

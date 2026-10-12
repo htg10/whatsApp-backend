@@ -163,6 +163,18 @@ class WhatsAppWebhookService extends BaseService
             $this->log($event, 'warning', 'chatbot.failed', 'Chatbot auto-reply error: ' . $e->getMessage());
         }
 
+        // Mobile push notification (best-effort — never blocks message intake).
+        try {
+            app(\App\Modules\Mobile\Services\PushNotificationService::class)->notifyTenant(
+                $tenantId,
+                $contact->name ?: $waId,
+                $body ?: "[{$msgType}]",
+                ['type' => 'whatsapp_message', 'conversation_id' => $conversation->uuid],
+            );
+        } catch (\Throwable $e) {
+            $this->log($event, 'warning', 'push.failed', 'Push notification error: ' . $e->getMessage());
+        }
+
         // Hot-lead detection (best-effort) — flags contacts who show buying interest.
         try {
             app(\App\Modules\Chatbot\Services\HotLeadDetector::class)
