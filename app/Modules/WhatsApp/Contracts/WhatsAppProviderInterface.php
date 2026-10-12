@@ -28,4 +28,10 @@ interface WhatsAppProviderInterface
     public function uploadMedia(string $phoneNumberId, string $path, string $mime): array;
 
     public function downloadMedia(string $mediaId): array;
+
+    /**
+     * Upload a sample image/video/document for a media-header template and return
+     * Meta's resumable-upload handle (used as the HEADER example.header_handle).
+     */
+    public function uploadTemplateMedia(string $appId, string $content, string $mime, string $fileName): string;
 }

@@ -71,6 +71,8 @@ class TemplateController extends Controller
             'waba_id' => ['nullable', 'string'],
             'header_format' => ['nullable', 'in:NONE,TEXT,IMAGE,VIDEO,DOCUMENT'],
             'header_text' => ['nullable', 'string', 'max:60'],
+            // Meta resumable-upload handle for a media header (from /templates/upload-sample).
+            'header_handle' => ['nullable', 'string'],
             'body' => ['required', 'string', 'max:1024'],
             'body_example' => ['nullable', 'array'],
             'body_example.*' => ['nullable', 'string'],
@@ -97,6 +99,12 @@ class TemplateController extends Controller
         if (Template::where('whatsapp_business_account_id', $waba->id)
             ->where('name', $data['name'])->where('language', $data['language'])->exists()) {
             return $this->fail('A template with this name and language already exists.', [], 422);
+        }
+
+        // Meta requires a sample for a media header; reject early with a clear message.
+        if (in_array($data['header_format'] ?? 'NONE', ['IMAGE', 'VIDEO', 'DOCUMENT'], true) && empty($data['header_handle'])) {
+            return $this->fail('Please upload a sample ' . strtolower($data['header_format'])
+                . ' for the header before submitting this template.', ['header_handle' => ['A sample file is required.']], 422);
         }
 
         $components = $this->buildComponents($data);
@@ -144,6 +152,49 @@ class TemplateController extends Controller
         ], 201);
     }
 
+    /**
+     * Upload a sample image/video/document that a media-header template needs for
+     * Meta's review. Returns a header_handle to pass to store().
+     */
+    public function uploadSample(Request $request): JsonResponse
+    {
+        $this->authorize('templates.create');
+
+        $data = $request->validate([
+            'file' => ['required', 'file', 'max:5120', 'mimes:jpg,jpeg,png,mp4,pdf'],
+            'waba_id' => ['nullable', 'string'],
+        ]);
+
+        $tenantId = $request->user()->tenant_id;
+        $waba = WhatsappBusinessAccount::where('tenant_id', $tenantId)
+            ->when($data['waba_id'] ?? null, fn ($q, $id) => $q->where('uuid', $id)->orWhere('waba_id', $id))
+            ->first();
+
+        if (! $waba) {
+            return $this->fail('Connect a WhatsApp Business account before uploading a sample.', [], 422);
+        }
+
+        $appId = config('services.meta.app_id');
+        if (! $appId) {
+            return $this->fail('Meta app is not configured, so sample uploads are unavailable.', [], 422);
+        }
+
+        $file = $request->file('file');
+
+        try {
+            $handle = $this->factory->for($waba)->uploadTemplateMedia(
+                (string) $appId,
+                file_get_contents($file->getRealPath()),
+                $file->getMimeType() ?: 'application/octet-stream',
+                $file->getClientOriginalName() ?: 'sample',
+            );
+        } catch (\Throwable $e) {
+            return $this->fail('Could not upload the sample to Meta: ' . $e->getMessage(), [], 422);
+        }
+
+        return $this->ok(['header_handle' => $handle]);
+    }
+
     public function destroy(Request $request, string $uuid): JsonResponse
     {
         $this->authorize('templates.delete');
@@ -173,7 +224,11 @@ class TemplateController extends Controller
         if ($headerFormat === 'TEXT' && ! empty($data['header_text'])) {
             $components[] = ['type' => 'HEADER', 'format' => 'TEXT', 'text' => $data['header_text']];
         } elseif (in_array($headerFormat, ['IMAGE', 'VIDEO', 'DOCUMENT'], true)) {
-            $components[] = ['type' => 'HEADER', 'format' => $headerFormat];
+            $header = ['type' => 'HEADER', 'format' => $headerFormat];
+            if (! empty($data['header_handle'])) {
+                $header['example'] = ['header_handle' => [$data['header_handle']]];
+            }
+            $components[] = $header;
         }
 
         $body = ['type' => 'BODY', 'text' => $data['body']];

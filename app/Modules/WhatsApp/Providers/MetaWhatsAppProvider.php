@@ -115,6 +115,43 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
                 ->post("/{$phoneNumberId}/media", ['messaging_product' => 'whatsapp', 'type' => $mime]));
     }
 
+    public function uploadTemplateMedia(string $appId, string $content, string $mime, string $fileName): string
+    {
+        // Meta resumable upload (two steps). Step 1: start a session.
+        $start = Http::withToken($this->token)->baseUrl($this->baseUrl)->acceptJson()->timeout($this->timeout)
+            ->post("/{$appId}/uploads", [
+                'file_name' => $fileName,
+                'file_length' => strlen($content),
+                'file_type' => $mime,
+            ]);
+
+        $sessionId = $start->json('id');
+        if ($start->failed() || ! $sessionId) {
+            throw new WhatsAppApiException(
+                userMessage: 'Could not start the sample upload with Meta. Please try a different file.',
+                httpStatus: 502,
+                technicalMessage: 'uploads start failed: ' . $start->body(),
+            );
+        }
+
+        // Step 2: upload the bytes; Meta returns the handle in "h".
+        $upload = Http::withHeaders(['Authorization' => 'OAuth ' . $this->token, 'file_offset' => '0'])
+            ->baseUrl($this->baseUrl)->timeout(max($this->timeout, 60))
+            ->withBody($content, $mime)
+            ->post("/{$sessionId}");
+
+        $handle = $upload->json('h');
+        if ($upload->failed() || ! $handle) {
+            throw new WhatsAppApiException(
+                userMessage: 'Could not upload the sample file to Meta. Please try a smaller file.',
+                httpStatus: 502,
+                technicalMessage: 'uploads body failed: ' . $upload->body(),
+            );
+        }
+
+        return $handle;
+    }
+
     public function downloadMedia(string $mediaId): array
     {
         $meta = $this->perform('GET', "/{$mediaId}", [],

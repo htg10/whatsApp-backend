@@ -77,4 +77,10 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
             'sha256' => 'fake_sha256',
         ];
     }
+
+    public function uploadTemplateMedia(string $appId, string $content, string $mime, string $fileName): string
+    {
+        $this->sent[] = ['template_media' => compact('appId', 'mime', 'fileName')];
+        return 'FAKE_HANDLE_' . Str::random(16);
+    }
 }
