@@ -192,19 +192,31 @@ class BulkSendService extends BaseService
         }
     }
 
-    /** Record a sent template as an outbound message in the recipient's chat. */
+    /**
+     * Record a sent template as an outbound message in the recipient's chat —
+     * but ONLY for contacts the business already has a conversation with. Cold
+     * bulk numbers do not get a new inbox chat (which would flood the inbox and
+     * pollute delivery analytics with unreachable numbers); their result stays
+     * tracked on the bulk-send recipient row.
+     */
     private function mirrorToInbox(BulkSend $bulkSend, WhatsappPhoneNumber $phone, string $number, string $bodyText, ?array $headerImage, ?string $wamid): void
     {
         try {
-            $contact = Contact::withoutGlobalScopes()->firstOrCreate(
-                ['tenant_id' => $bulkSend->tenant_id, 'wa_id' => $number],
-                ['phone' => '+' . $number, 'source' => 'bulk'],
-            );
+            $contact = Contact::withoutGlobalScopes()
+                ->where('tenant_id', $bulkSend->tenant_id)
+                ->where('wa_id', $number)
+                ->first();
+            if (! $contact) {
+                return;
+            }
 
-            $conversation = Conversation::withoutGlobalScopes()->firstOrCreate(
-                ['contact_id' => $contact->id, 'whatsapp_phone_number_id' => $phone->id],
-                ['tenant_id' => $bulkSend->tenant_id, 'status' => 'open', 'unread_count' => 0, 'is_bot_active' => false],
-            );
+            $conversation = Conversation::withoutGlobalScopes()
+                ->where('contact_id', $contact->id)
+                ->where('whatsapp_phone_number_id', $phone->id)
+                ->first();
+            if (! $conversation) {
+                return; // only mirror into chats that already exist
+            }
 
             $message = Message::withoutGlobalScopes()->create([
                 'tenant_id' => $bulkSend->tenant_id,

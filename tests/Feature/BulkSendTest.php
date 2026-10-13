@@ -213,9 +213,20 @@ class BulkSendTest extends TestCase
         $this->assertSame('media_abc123', $send->components[0]['parameters'][0]['image']['id']);
     }
 
-    public function test_bulk_send_appears_in_the_inbox_with_its_image(): void
+    public function test_bulk_send_mirrors_into_an_existing_chat_with_its_image(): void
     {
         $this->imageHeaderTemplate('promo_img', 'en_US');
+        $phone = WhatsappPhoneNumber::withoutGlobalScopes()->firstOrFail();
+
+        // An existing contact + conversation for the recipient.
+        $contact = \App\Models\Contact::create([
+            'tenant_id' => $phone->tenant_id, 'wa_id' => '919876543210',
+            'phone' => '+919876543210', 'name' => 'Known', 'source' => 'inbound',
+        ]);
+        $conv = \App\Models\Conversation::create([
+            'tenant_id' => $phone->tenant_id, 'contact_id' => $contact->id,
+            'whatsapp_phone_number_id' => $phone->id, 'status' => 'open',
+        ]);
 
         $this->authed()->postJson('/api/v1/whatsapp/bulk-send', [
             'numbers' => ['919876543210'],
@@ -224,10 +235,6 @@ class BulkSendTest extends TestCase
             'header_media_url' => 'https://example.com/banner.jpg',
         ])->assertCreated();
 
-        $conv = \App\Models\Conversation::withoutGlobalScopes()
-            ->whereHas('contact', fn ($q) => $q->where('wa_id', '919876543210'))->first();
-        $this->assertNotNull($conv, 'A conversation should be created for the bulk recipient.');
-
         $msg = \App\Models\Message::withoutGlobalScopes()
             ->where('conversation_id', $conv->id)
             ->where('direction', \App\Models\Message::DIRECTION_OUTBOUND)->latest('id')->first();
@@ -235,6 +242,21 @@ class BulkSendTest extends TestCase
         $this->assertSame('image', $msg->type);
         $this->assertSame(1, \App\Models\MessageAttachment::withoutGlobalScopes()
             ->where('message_id', $msg->id)->where('type', 'image')->count());
+    }
+
+    public function test_bulk_send_does_not_create_a_chat_for_a_cold_number(): void
+    {
+        $this->imageHeaderTemplate('promo_img', 'en_US');
+
+        $this->authed()->postJson('/api/v1/whatsapp/bulk-send', [
+            'numbers' => ['919000000099'],
+            'template' => 'promo_img',
+            'language' => 'en_US',
+            'header_media_url' => 'https://example.com/banner.jpg',
+        ])->assertCreated();
+
+        $this->assertSame(0, \App\Models\Conversation::withoutGlobalScopes()
+            ->whereHas('contact', fn ($q) => $q->where('wa_id', '919000000099'))->count());
     }
 
     public function test_retry_resends_only_the_failed_numbers(): void
