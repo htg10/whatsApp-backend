@@ -14,3 +14,6 @@ Schedule::command('social:publish-due')->everyMinute()->withoutOverlapping();
 
 // Finish bulk sends / campaigns whose web worker was killed mid-way.
 Schedule::command('whatsapp:resume-sends')->everyMinute()->withoutOverlapping(30);
+
+// Nudge quiet customers (two follow-ups, at +6h and +12h).
+Schedule::command('whatsapp:send-followups')->everyTenMinutes()->withoutOverlapping(20);

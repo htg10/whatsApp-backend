@@ -19,12 +19,14 @@ class Conversation extends Model
         'tenant_id', 'contact_id', 'whatsapp_phone_number_id', 'assigned_agent_id',
         'status', 'unread_count', 'is_bot_active', 'last_message_at',
         'last_message_preview', 'window_expires_at', 'meta',
+        'last_customer_message_at', 'followup_stage',
     ];
 
     protected $casts = [
         'is_bot_active' => 'boolean',
         'last_message_at' => 'datetime',
         'window_expires_at' => 'datetime',
+        'last_customer_message_at' => 'datetime',
         'meta' => 'array',
     ];
 

@@ -148,6 +148,9 @@ class WhatsAppWebhookService extends BaseService
             'last_message_at' => now(),
             'last_message_preview' => Str::limit($body ?? "[$msgType]", 100),
             'unread_count' => $conversation->unread_count + 1,
+            // The customer just replied — restart the follow-up clock.
+            'last_customer_message_at' => now(),
+            'followup_stage' => 0,
         ]);
 
         $this->log($event, 'info', 'message.received', "Inbound {$msgType} from {$waId}", [

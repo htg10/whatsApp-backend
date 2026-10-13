@@ -64,6 +64,8 @@ class ChatbotController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'ai_enabled' => ['sometimes', 'boolean'],
             'ai_instructions' => ['nullable', 'string', 'max:8000'],
+            'followup_enabled' => ['sometimes', 'boolean'],
+            'followup_message' => ['nullable', 'string', 'max:1000'],
         ]);
 
         app(\App\Modules\Billing\Services\PlanLimitService::class)->assertWithinLimit($request->user()->tenant_id, 'max_chatbots', 'chatbots', 'chatbots');
@@ -77,6 +79,8 @@ class ChatbotController extends Controller
             'is_active' => $data['is_active'] ?? false,
             'ai_enabled' => $data['ai_enabled'] ?? false,
             'ai_instructions' => $data['ai_instructions'] ?? null,
+            'followup_enabled' => $data['followup_enabled'] ?? false,
+            'followup_message' => $data['followup_message'] ?? null,
         ]);
 
         $chatbot->load('phoneNumber')->loadCount('rules');
@@ -98,6 +102,8 @@ class ChatbotController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'ai_enabled' => ['sometimes', 'boolean'],
             'ai_instructions' => ['nullable', 'string', 'max:8000'],
+            'followup_enabled' => ['sometimes', 'boolean'],
+            'followup_message' => ['nullable', 'string', 'max:1000'],
         ]);
 
         if (array_key_exists('phone_number_id', $data)) {
