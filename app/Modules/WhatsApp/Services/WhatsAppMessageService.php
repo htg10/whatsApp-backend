@@ -71,6 +71,12 @@ class WhatsAppMessageService extends BaseService
         return $result['id'] ?? null;
     }
 
+    /** Download media bytes by Meta media id. Returns ['content','mime_type',...]. */
+    public function downloadMedia(WhatsappPhoneNumber $phone, string $mediaId): array
+    {
+        return $this->provider($phone)->downloadMedia($mediaId);
+    }
+
     /** Convenience: extract the wamid from a send result, or null. */
     public function wamid(array $result): ?string
     {

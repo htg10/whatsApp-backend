@@ -15,6 +15,8 @@ use Database\Seeders\PlanSeeder;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class BulkSendTest extends TestCase
@@ -28,6 +30,10 @@ class BulkSendTest extends TestCase
         parent::setUp();
         $this->seed(RolePermissionSeeder::class);
         $this->seed(PlanSeeder::class);
+
+        // The inbox mirror fetches header images over HTTP and stores them.
+        Storage::fake('local');
+        Http::fake(['*' => Http::response('fake-image-bytes', 200, ['Content-Type' => 'image/jpeg'])]);
 
         $this->token = $this->postJson('/api/v1/auth/register', [
             'company_name' => 'Acme', 'name' => 'Owner', 'email' => 'owner@acme.test',
@@ -205,6 +211,30 @@ class BulkSendTest extends TestCase
 
         $send = BulkSend::withoutGlobalScopes()->latest('id')->first();
         $this->assertSame('media_abc123', $send->components[0]['parameters'][0]['image']['id']);
+    }
+
+    public function test_bulk_send_appears_in_the_inbox_with_its_image(): void
+    {
+        $this->imageHeaderTemplate('promo_img', 'en_US');
+
+        $this->authed()->postJson('/api/v1/whatsapp/bulk-send', [
+            'numbers' => ['919876543210'],
+            'template' => 'promo_img',
+            'language' => 'en_US',
+            'header_media_url' => 'https://example.com/banner.jpg',
+        ])->assertCreated();
+
+        $conv = \App\Models\Conversation::withoutGlobalScopes()
+            ->whereHas('contact', fn ($q) => $q->where('wa_id', '919876543210'))->first();
+        $this->assertNotNull($conv, 'A conversation should be created for the bulk recipient.');
+
+        $msg = \App\Models\Message::withoutGlobalScopes()
+            ->where('conversation_id', $conv->id)
+            ->where('direction', \App\Models\Message::DIRECTION_OUTBOUND)->latest('id')->first();
+        $this->assertNotNull($msg);
+        $this->assertSame('image', $msg->type);
+        $this->assertSame(1, \App\Models\MessageAttachment::withoutGlobalScopes()
+            ->where('message_id', $msg->id)->where('type', 'image')->count());
     }
 
     public function test_retry_resends_only_the_failed_numbers(): void

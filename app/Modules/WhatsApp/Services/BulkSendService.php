@@ -5,9 +5,17 @@ namespace App\Modules\WhatsApp\Services;
 use App\Models\BlacklistEntry;
 use App\Models\BulkSend;
 use App\Models\BulkSendRecipient;
+use App\Models\Contact;
+use App\Models\Conversation;
+use App\Models\Message;
+use App\Models\MessageAttachment;
+use App\Models\Template;
 use App\Models\WhatsappPhoneNumber;
 use App\Modules\WhatsApp\Exceptions\WhatsAppApiException;
 use App\Support\Services\BaseService;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -124,6 +132,114 @@ class BulkSendService extends BaseService
         return $bulkSend->fresh(['phoneNumber', 'recipients']);
     }
 
+    /** The template body with {{n}} filled from the send's variables, for inbox display. */
+    private function renderBody(BulkSend $bulkSend): string
+    {
+        $text = Template::bodyText($bulkSend->tenant_id, $bulkSend->template_name, $bulkSend->language)
+            ?: ('📄 ' . $bulkSend->template_name);
+
+        $bodyComp = collect($bulkSend->components ?? [])->firstWhere('type', 'body');
+        foreach (($bodyComp['parameters'] ?? []) as $i => $p) {
+            $text = str_replace('{{' . ($i + 1) . '}}', (string) ($p['text'] ?? ''), $text);
+        }
+
+        return $text;
+    }
+
+    /**
+     * Fetch the template's header image ONCE (from the public URL or the uploaded
+     * media id) and store it locally, so each mirrored message can show it.
+     *
+     * @return array{path:string, mime:string}|null
+     */
+    private function resolveHeaderImage(BulkSend $bulkSend, WhatsappPhoneNumber $phone): ?array
+    {
+        $header = collect($bulkSend->components ?? [])->firstWhere('type', 'header');
+        $param = $header['parameters'][0] ?? null;
+        if (! $param || ($param['type'] ?? null) !== 'image') {
+            return null; // only image headers are shown in the inbox
+        }
+
+        $media = $param['image'] ?? [];
+        $path = "whatsapp/media/{$bulkSend->tenant_id}/bulk_{$bulkSend->id}.jpg";
+
+        if (Storage::disk('local')->exists($path)) {
+            return ['path' => $path, 'mime' => 'image/jpeg'];
+        }
+
+        try {
+            if (! empty($media['link'])) {
+                $res = Http::timeout(30)->get($media['link']);
+                if ($res->failed()) {
+                    return null;
+                }
+                $bytes = $res->body();
+                $mime = $res->header('Content-Type') ?: 'image/jpeg';
+            } elseif (! empty($media['id'])) {
+                $dl = $this->messages->downloadMedia($phone, $media['id']);
+                $bytes = $dl['content'];
+                $mime = $dl['mime_type'] ?? 'image/jpeg';
+            } else {
+                return null;
+            }
+
+            Storage::disk('local')->put($path, $bytes);
+
+            return ['path' => $path, 'mime' => $mime];
+        } catch (\Throwable $e) {
+            Log::warning('bulk: header image fetch failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /** Record a sent template as an outbound message in the recipient's chat. */
+    private function mirrorToInbox(BulkSend $bulkSend, WhatsappPhoneNumber $phone, string $number, string $bodyText, ?array $headerImage, ?string $wamid): void
+    {
+        try {
+            $contact = Contact::withoutGlobalScopes()->firstOrCreate(
+                ['tenant_id' => $bulkSend->tenant_id, 'wa_id' => $number],
+                ['phone' => '+' . $number, 'source' => 'bulk'],
+            );
+
+            $conversation = Conversation::withoutGlobalScopes()->firstOrCreate(
+                ['contact_id' => $contact->id, 'whatsapp_phone_number_id' => $phone->id],
+                ['tenant_id' => $bulkSend->tenant_id, 'status' => 'open', 'unread_count' => 0, 'is_bot_active' => false],
+            );
+
+            $message = Message::withoutGlobalScopes()->create([
+                'tenant_id' => $bulkSend->tenant_id,
+                'conversation_id' => $conversation->id,
+                'contact_id' => $contact->id,
+                'whatsapp_phone_number_id' => $phone->id,
+                'direction' => Message::DIRECTION_OUTBOUND,
+                'type' => $headerImage ? 'image' : 'template',
+                'body' => $bodyText,
+                'external_message_id' => $wamid,
+                'status' => 'sent',
+                'sent_at' => now(),
+            ]);
+
+            if ($headerImage) {
+                MessageAttachment::withoutGlobalScopes()->create([
+                    'tenant_id' => $bulkSend->tenant_id,
+                    'message_id' => $message->id,
+                    'type' => 'image',
+                    'mime_type' => $headerImage['mime'],
+                    'storage_disk' => 'local',
+                    'storage_path' => $headerImage['path'],
+                    'caption' => $bodyText,
+                ]);
+            }
+
+            $conversation->forceFill([
+                'last_message_at' => now(),
+                'last_message_preview' => Str::limit($bodyText ?: '[template]', 100),
+            ])->saveQuietly();
+        } catch (\Throwable $e) {
+            Log::warning('bulk: inbox mirror failed for ' . $number . ': ' . $e->getMessage());
+        }
+    }
+
     /** Send pending recipients until done, or until $maxSeconds elapses. */
     public function process(BulkSend $bulkSend, ?int $maxSeconds = null): void
     {
@@ -134,6 +250,11 @@ class BulkSendService extends BaseService
             $this->failPending($bulkSend, 'The WhatsApp number used for this send is no longer connected.');
             return;
         }
+
+        // Resolve the display content ONCE so each sent message can be mirrored
+        // into the recipient's inbox chat (like it appears on their WhatsApp).
+        $bodyText = $this->renderBody($bulkSend);
+        $headerImage = $this->resolveHeaderImage($bulkSend, $phone);
 
         while ($deadline === null || microtime(true) < $deadline) {
             $recipient = BulkSendRecipient::where('bulk_send_id', $bulkSend->id)
@@ -153,11 +274,13 @@ class BulkSendService extends BaseService
                     $bulkSend->language,
                     $bulkSend->components ?? [],
                 );
+                $wamid = $this->messages->wamid($result);
                 $recipient->update([
                     'status' => 'sent',
-                    'wamid' => $this->messages->wamid($result),
+                    'wamid' => $wamid,
                     'sent_at' => now(),
                 ]);
+                $this->mirrorToInbox($bulkSend, $phone, $recipient->phone, $bodyText, $headerImage, $wamid);
             } catch (\Throwable $e) {
                 $recipient->update([
                     'status' => 'failed',
