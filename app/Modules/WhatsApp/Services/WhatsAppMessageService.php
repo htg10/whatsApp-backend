@@ -63,6 +63,14 @@ class WhatsAppMessageService extends BaseService
         ]);
     }
 
+    /** Upload a local file to Meta and return its media id (for template headers). */
+    public function uploadMediaFile(WhatsappPhoneNumber $phone, string $path, string $mime): ?string
+    {
+        $result = $this->provider($phone)->uploadMedia($phone->phone_number_id, $path, $mime);
+
+        return $result['id'] ?? null;
+    }
+
     /** Convenience: extract the wamid from a send result, or null. */
     public function wamid(array $result): ?string
     {

@@ -96,6 +96,34 @@ class BulkSendService extends BaseService
         return $bulkSend->fresh(['phoneNumber', 'recipients']);
     }
 
+    /**
+     * Re-send only the failed recipients of a bulk send, reusing the saved
+     * template/components — so the user never re-enters anything.
+     */
+    public function retryFailed(BulkSend $bulkSend): BulkSend
+    {
+        $failed = BulkSendRecipient::where('bulk_send_id', $bulkSend->id)->where('status', 'failed')->count();
+        if ($failed === 0) {
+            return $bulkSend->fresh(['phoneNumber', 'recipients']);
+        }
+
+        BulkSendRecipient::where('bulk_send_id', $bulkSend->id)
+            ->where('status', 'failed')
+            ->update([
+                'status' => 'pending', 'error_message' => null, 'error_code' => null,
+                'wamid' => null, 'sent_at' => null, 'updated_at' => now(),
+            ]);
+
+        $bulkSend->forceFill(['status' => 'processing', 'updated_at' => now()])->save();
+
+        $this->process($bulkSend, self::INLINE_SECONDS);
+        if ($bulkSend->status === 'processing') {
+            $this->continueAfterResponse($bulkSend);
+        }
+
+        return $bulkSend->fresh(['phoneNumber', 'recipients']);
+    }
+
     /** Send pending recipients until done, or until $maxSeconds elapses. */
     public function process(BulkSend $bulkSend, ?int $maxSeconds = null): void
     {

@@ -14,6 +14,7 @@ use App\Models\WhatsappPhoneNumber;
 use Database\Seeders\PlanSeeder;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 class BulkSendTest extends TestCase
@@ -180,5 +181,50 @@ class BulkSendTest extends TestCase
         $this->assertSame('header', $send->components[0]['type']);
         $this->assertSame('image', $send->components[0]['parameters'][0]['type']);
         $this->assertSame('https://example.com/banner.jpg', $send->components[0]['parameters'][0]['image']['link']);
+    }
+
+    public function test_upload_header_returns_a_media_id(): void
+    {
+        $this->authed()->postJson('/api/v1/whatsapp/bulk-send/upload-header', [
+            'file' => UploadedFile::fake()->image('banner.jpg', 600, 400),
+        ])
+            ->assertOk()
+            ->assertJsonStructure(['data' => ['media_id']]);
+    }
+
+    public function test_image_header_template_sends_with_an_uploaded_media_id(): void
+    {
+        $this->imageHeaderTemplate('promo_img', 'en_US');
+
+        $this->authed()->postJson('/api/v1/whatsapp/bulk-send', [
+            'numbers' => ['+91 98765 43210'],
+            'template' => 'promo_img',
+            'language' => 'en_US',
+            'header_media_id' => 'media_abc123',
+        ])->assertCreated()->assertJsonPath('data.bulk_send.status', 'completed');
+
+        $send = BulkSend::withoutGlobalScopes()->latest('id')->first();
+        $this->assertSame('media_abc123', $send->components[0]['parameters'][0]['image']['id']);
+    }
+
+    public function test_retry_resends_only_the_failed_numbers(): void
+    {
+        $phone = WhatsappPhoneNumber::withoutGlobalScopes()->firstOrFail();
+        $send = BulkSend::create([
+            'tenant_id' => $phone->tenant_id, 'whatsapp_phone_number_id' => $phone->id,
+            'template_name' => 'hello_world', 'language' => 'en_US',
+            'status' => 'failed', 'total' => 2, 'sent_count' => 1, 'failed_count' => 1,
+        ]);
+        BulkSendRecipient::create(['bulk_send_id' => $send->id, 'phone' => '919000000001', 'status' => 'sent']);
+        BulkSendRecipient::create(['bulk_send_id' => $send->id, 'phone' => '919000000002', 'status' => 'failed', 'error_message' => 'boom']);
+
+        $this->authed()->postJson("/api/v1/whatsapp/bulk-sends/{$send->uuid}/retry")
+            ->assertOk()
+            ->assertJsonPath('data.bulk_send.status', 'completed')
+            ->assertJsonPath('data.bulk_send.sent_count', 2)
+            ->assertJsonPath('data.bulk_send.failed_count', 0);
+
+        $this->assertSame('sent', BulkSendRecipient::where('bulk_send_id', $send->id)
+            ->where('phone', '919000000002')->value('status'));
     }
 }

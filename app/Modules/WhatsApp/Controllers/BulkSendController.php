@@ -4,13 +4,18 @@ namespace App\Modules\WhatsApp\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\BulkSend;
+use App\Models\WhatsappPhoneNumber;
 use App\Modules\WhatsApp\Services\BulkSendService;
+use App\Modules\WhatsApp\Services\WhatsAppMessageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class BulkSendController extends Controller
 {
-    public function __construct(private readonly BulkSendService $service) {}
+    public function __construct(
+        private readonly BulkSendService $service,
+        private readonly WhatsAppMessageService $messages,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -62,8 +67,10 @@ class BulkSendController extends Controller
             // every recipient (bulk send is one message to many numbers).
             'variables' => ['nullable', 'array', 'max:20'],
             'variables.*' => ['nullable', 'string', 'max:1024'],
-            // Public URL for templates whose HEADER is an image/video/document.
+            // A media HEADER is supplied either as a public URL or an uploaded
+            // media id (from /bulk-send/upload-header). Either one works.
             'header_media_url' => ['nullable', 'url', 'max:2048'],
+            'header_media_id' => ['nullable', 'string', 'max:128'],
         ]);
 
         $components = [];
@@ -74,18 +81,21 @@ class BulkSendController extends Controller
             $request->user()->tenant_id, $data['template'], $data['language'] ?? null
         );
         if (in_array($headerFormat, ['IMAGE', 'VIDEO', 'DOCUMENT'], true)) {
-            if (empty($data['header_media_url'])) {
+            if (empty($data['header_media_url']) && empty($data['header_media_id'])) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
                     'header_media_url' => ['This template has an ' . strtolower($headerFormat)
-                        . ' header. Please provide a public ' . strtolower($headerFormat) . ' URL to send it.'],
+                        . ' header. Upload an image/file or paste a public URL to send it.'],
                 ]);
             }
             $mediaKey = strtolower($headerFormat); // image | video | document
+            $media = ! empty($data['header_media_id'])
+                ? ['id' => $data['header_media_id']]
+                : ['link' => $data['header_media_url']];
             $components[] = [
                 'type' => 'header',
                 'parameters' => [[
                     'type' => $mediaKey,
-                    $mediaKey => ['link' => $data['header_media_url']],
+                    $mediaKey => $media,
                 ]],
             ];
         }
@@ -112,6 +122,50 @@ class BulkSendController extends Controller
         );
 
         return $this->ok(['bulk_send' => $result], 201);
+    }
+
+    /** Upload a local header image/video/document to Meta; returns a media id. */
+    public function uploadHeader(Request $request): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+
+        $request->validate([
+            'file' => ['required', 'file', 'max:16384', 'mimes:jpg,jpeg,png,mp4,pdf'],
+        ]);
+
+        $phone = WhatsappPhoneNumber::where('tenant_id', $request->user()->tenant_id)
+            ->whereIn('status', ['connected', 'registered'])
+            ->orderByDesc('is_default')
+            ->first();
+
+        if (! $phone) {
+            return $this->fail('Connect and register a WhatsApp number before uploading media.', [], 422);
+        }
+
+        $file = $request->file('file');
+
+        try {
+            $mediaId = $this->messages->uploadMediaFile($phone, $file->getRealPath(), $file->getMimeType() ?: 'application/octet-stream');
+        } catch (\Throwable $e) {
+            return $this->fail('Could not upload the image to WhatsApp: ' . $e->getMessage(), [], 422);
+        }
+
+        if (! $mediaId) {
+            return $this->fail('WhatsApp did not return a media id. Please try a different file.', [], 422);
+        }
+
+        return $this->ok(['media_id' => $mediaId]);
+    }
+
+    /** Re-send only the failed numbers of a bulk send (no re-entry needed). */
+    public function retry(string $uuid): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+
+        $send = BulkSend::where('uuid', $uuid)->firstOrFail();
+        $result = $this->service->retryFailed($send);
+
+        return $this->ok(['bulk_send' => $result->load(['phoneNumber', 'recipients'])]);
     }
 
     /** HEADER format (TEXT/IMAGE/VIDEO/DOCUMENT) of a template, or null if none. */
