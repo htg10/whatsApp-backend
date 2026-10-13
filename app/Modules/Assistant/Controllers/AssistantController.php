@@ -3,10 +3,13 @@
 namespace App\Modules\Assistant\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\BlacklistEntry;
 use App\Models\Campaign;
 use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Models\Template;
+use App\Models\User;
 use App\Models\WhatsappPhoneNumber;
 use App\Modules\Chatbot\Services\AiReplyService;
 use Illuminate\Http\JsonResponse;
@@ -70,7 +73,9 @@ class AssistantController extends Controller
         $onlyAssigned = ! $user->is_super_admin && ! $user->can('conversations.assign');
 
         $today = now()->startOfDay();
+        $yesterday = now()->subDay()->startOfDay();
         $weekStart = now()->startOfWeek();
+        $monthStart = now()->startOfMonth();
 
         // Conversations (scoped to the agent's assigned chats when applicable).
         $convBase = Conversation::query();
@@ -93,14 +98,26 @@ class AssistantController extends Controller
             ->where('direction', Message::DIRECTION_INBOUND)->count();
         $outboundToday = (clone $msgBase)->where('created_at', '>=', $today)
             ->where('direction', Message::DIRECTION_OUTBOUND)->count();
+        $messagesYesterday = (clone $msgBase)->whereBetween('created_at', [$yesterday, $today])->count();
         $messagesThisWeek = (clone $msgBase)->where('created_at', '>=', $weekStart)->count();
+        $messagesThisMonth = (clone $msgBase)->where('created_at', '>=', $monthStart)->count();
 
         // Tenant-wide counts the user is allowed to see.
         $totalContacts = Contact::count();
         $hotContacts = Contact::where('tag_list', 'like', '%' . Contact::HOT_TAG . '%')->count();
+        $blacklisted = BlacklistEntry::count();
         $totalCampaigns = Campaign::count();
         $runningCampaigns = Campaign::where('status', 'running')->count();
+        $completedCampaigns = Campaign::where('status', 'completed')->count();
         $whatsappNumbers = WhatsappPhoneNumber::count();
+        $agents = User::where('is_super_admin', false)
+            ->whereHas('roles', fn ($q) => $q->where('name', 'agent'))->count();
+
+        $tpl = Template::selectRaw('COUNT(*) as total,'
+            . " SUM(CASE WHEN status = 'APPROVED' THEN 1 ELSE 0 END) as approved,"
+            . " SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending,"
+            . " SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END) as rejected")
+            ->first();
 
         return [
             'scope' => $onlyAssigned ? 'assigned_chats_only' : 'whole_business',
@@ -111,11 +128,20 @@ class AssistantController extends Controller
             'messages_today' => $messagesToday,
             'incoming_messages_today' => $inboundToday,
             'outgoing_messages_today' => $outboundToday,
+            'messages_yesterday' => $messagesYesterday,
             'messages_this_week' => $messagesThisWeek,
+            'messages_this_month' => $messagesThisMonth,
             'total_contacts' => $totalContacts,
             'hot_leads' => $hotContacts,
+            'blacklisted_contacts' => $blacklisted,
             'total_campaigns' => $totalCampaigns,
             'running_campaigns' => $runningCampaigns,
+            'completed_campaigns' => $completedCampaigns,
+            'agents' => $agents,
+            'templates_total' => (int) $tpl->total,
+            'templates_approved' => (int) $tpl->approved,
+            'templates_pending' => (int) $tpl->pending,
+            'templates_rejected' => (int) $tpl->rejected,
         ];
     }
 
@@ -130,9 +156,12 @@ class AssistantController extends Controller
             '- ' . $scopeNote,
             "- Conversations: {$s['total_conversations']} total, {$s['open_conversations']} open, {$s['unread_conversations']} unread",
             "- Messages today: {$s['messages_today']} ({$s['incoming_messages_today']} incoming, {$s['outgoing_messages_today']} outgoing)",
-            "- Messages this week: {$s['messages_this_week']}",
-            "- Contacts: {$s['total_contacts']} total, {$s['hot_leads']} hot leads",
-            "- Campaigns: {$s['total_campaigns']} total, {$s['running_campaigns']} running",
+            "- Messages yesterday: {$s['messages_yesterday']}",
+            "- Messages this week: {$s['messages_this_week']}; this month: {$s['messages_this_month']}",
+            "- Contacts: {$s['total_contacts']} total, {$s['hot_leads']} hot leads, {$s['blacklisted_contacts']} black-listed",
+            "- Campaigns: {$s['total_campaigns']} total, {$s['running_campaigns']} running, {$s['completed_campaigns']} completed",
+            "- Templates: {$s['templates_total']} total, {$s['templates_approved']} approved, {$s['templates_pending']} pending, {$s['templates_rejected']} rejected",
+            "- Agents: {$s['agents']}",
             "- Connected WhatsApp numbers: {$s['whatsapp_numbers']}",
         ]);
     }

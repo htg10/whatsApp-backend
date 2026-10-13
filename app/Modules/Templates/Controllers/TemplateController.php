@@ -18,7 +18,7 @@ class TemplateController extends Controller
     {
         $this->authorize('templates.view');
 
-        $query = Template::with('businessAccount')->orderBy('name');
+        $query = Template::with('businessAccount', 'components')->orderBy('name');
 
         if ($status = $request->query('status')) {
             $query->where('status', strtoupper($status));

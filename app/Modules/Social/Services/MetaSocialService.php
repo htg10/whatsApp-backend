@@ -38,6 +38,53 @@ class MetaSocialService
         ];
     }
 
+    /**
+     * Exchange a short-lived user token for a long-lived one (optional but
+     * recommended). Returns the long-lived token, or the original on failure.
+     */
+    public function exchangeUserToken(string $shortLivedToken): string
+    {
+        $appId = config('services.meta.app_id');
+        $appSecret = config('services.meta.app_secret');
+        if (! $appId || ! $appSecret) {
+            return $shortLivedToken;
+        }
+
+        $res = Http::timeout(30)->get("{$this->base}/oauth/access_token", [
+            'grant_type' => 'fb_exchange_token',
+            'client_id' => $appId,
+            'client_secret' => $appSecret,
+            'fb_exchange_token' => $shortLivedToken,
+        ]);
+
+        return $res->ok() ? ($res->json('access_token') ?: $shortLivedToken) : $shortLivedToken;
+    }
+
+    /**
+     * List the Facebook Pages the user manages, each with its own Page access
+     * token and linked Instagram Business account (if any).
+     *
+     * @return array<int, array{id:string,name:string,access_token:string,ig_user_id:?string,ig_username:?string}>
+     */
+    public function listPages(string $userToken): array
+    {
+        $res = Http::timeout(30)->get("{$this->base}/me/accounts", [
+            'fields' => 'id,name,access_token,instagram_business_account{id,username}',
+            'limit' => 100,
+            'access_token' => $userToken,
+        ]);
+
+        $this->guard($res, 'Could not list your Facebook Pages');
+
+        return array_map(fn ($p) => [
+            'id' => $p['id'] ?? '',
+            'name' => $p['name'] ?? '',
+            'access_token' => $p['access_token'] ?? '',
+            'ig_user_id' => $p['instagram_business_account']['id'] ?? null,
+            'ig_username' => $p['instagram_business_account']['username'] ?? null,
+        ], $res->json('data', []));
+    }
+
     /** Publish a photo to the Facebook Page. Returns the new post id. */
     public function publishFacebook(string $pageId, string $token, string $imageUrl, ?string $caption): string
     {

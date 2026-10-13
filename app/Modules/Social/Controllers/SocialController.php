@@ -23,7 +23,35 @@ class SocialController extends Controller
 
         $conn = SocialConnection::first();
 
-        return $this->ok(['connection' => $conn ? $this->connectionArray($conn) : null]);
+        return $this->ok([
+            'connection' => $conn ? $this->connectionArray($conn) : null,
+            // For the "Login with Facebook" page picker on the app.
+            'facebook_app_id' => config('services.meta.app_id'),
+            'api_version' => config('services.meta.api_version', 'v23.0'),
+        ]);
+    }
+
+    /**
+     * After "Login with Facebook" on the app, exchange the user token for a
+     * long-lived one and return the Pages the user can publish to, so they can
+     * pick which Page (and its linked Instagram) to connect.
+     */
+    public function pages(Request $request): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+
+        $data = $request->validate([
+            'user_token' => ['required', 'string'],
+        ]);
+
+        try {
+            $longLived = $this->meta->exchangeUserToken($data['user_token']);
+            $pages = $this->meta->listPages($longLived);
+        } catch (\Throwable $e) {
+            return $this->fail('Could not load your Facebook Pages: ' . $e->getMessage(), [], 422);
+        }
+
+        return $this->ok(['pages' => $pages]);
     }
 
     public function connect(Request $request): JsonResponse

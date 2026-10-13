@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('social')->group(function () {
     Route::get('/connection', [SocialController::class, 'connection']);
+    Route::post('/pages', [SocialController::class, 'pages']);
     Route::post('/connect', [SocialController::class, 'connect']);
     Route::post('/recheck-instagram', [SocialController::class, 'recheckInstagram']);
     Route::delete('/connection', [SocialController::class, 'disconnect']);
