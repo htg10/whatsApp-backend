@@ -68,6 +68,7 @@ class UserResource extends JsonResource
         return [
             'status' => $sub->status,
             'plan_name' => $sub->plan?->name,
+            'current_period_start' => $sub->current_period_start?->toIso8601String(),
             'current_period_end' => $sub->current_period_end?->toIso8601String(),
         ];
     }
