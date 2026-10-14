@@ -83,7 +83,7 @@ class CleanupColdBroadcastsTest extends TestCase
         $this->assertSame(2, Conversation::withoutGlobalScopes()->whereNull('deleted_at')->count());
 
         // Apply removes only the cold one.
-        $this->artisan('whatsapp:cleanup-broadcasts', ['--tenant' => $this->tenantId, '--apply' => true])->assertSuccessful();
+        $this->artisan('whatsapp:cleanup-broadcasts', ['--tenant' => $this->tenantId, '--apply' => true, '--force' => true])->assertSuccessful();
 
         $this->assertNotNull($cold->fresh()->deleted_at, 'cold chat should be soft-deleted');
         $this->assertNull($engaged->fresh()->deleted_at, 'engaged chat should remain');
@@ -94,5 +94,23 @@ class CleanupColdBroadcastsTest extends TestCase
 
         // Contacts are kept.
         $this->assertSame(2, Contact::withoutGlobalScopes()->count());
+    }
+
+    public function test_restore_brings_back_everything_the_cleanup_removed(): void
+    {
+        $cold = $this->conversation('919000000001');
+        $this->message($cold, Message::DIRECTION_OUTBOUND, 'failed');
+
+        $this->artisan('whatsapp:cleanup-broadcasts', ['--tenant' => $this->tenantId, '--apply' => true, '--force' => true])->assertSuccessful();
+        $this->assertNotNull($cold->fresh()->deleted_at);
+
+        // Restore (dry-run then apply).
+        $this->artisan('whatsapp:restore-broadcasts', ['--tenant' => $this->tenantId])->assertSuccessful();
+        $this->assertNotNull($cold->fresh()->deleted_at, 'dry-run must not restore');
+
+        $this->artisan('whatsapp:restore-broadcasts', ['--tenant' => $this->tenantId, '--apply' => true])->assertSuccessful();
+
+        $this->assertNull($cold->fresh()->deleted_at, 'chat should be back');
+        $this->assertSame(1, Message::where('conversation_id', $cold->id)->count(), 'its message should be back');
     }
 }

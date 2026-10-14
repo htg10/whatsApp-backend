@@ -23,7 +23,7 @@ use Illuminate\Console\Command;
  */
 class CleanupColdBroadcasts extends Command
 {
-    protected $signature = 'whatsapp:cleanup-broadcasts {--tenant= : Only this tenant id} {--apply : Actually delete (otherwise dry-run)}';
+    protected $signature = 'whatsapp:cleanup-broadcasts {--tenant= : Only this tenant id} {--apply : Actually delete (otherwise dry-run)} {--force : Skip the confirmation prompt}';
     protected $description = 'Delete cold broadcast chats (no inbound ever) that pollute the inbox and analytics';
 
     public function handle(): int
@@ -64,6 +64,14 @@ class CleanupColdBroadcasts extends Command
         if (! $apply) {
             $this->line('');
             $this->comment('Re-run with --apply to remove them. Contacts are kept.');
+
+            return self::SUCCESS;
+        }
+
+        // Guard against an accidental mass delete. Soft-delete is reversible via
+        // whatsapp:restore-broadcasts, but confirm anyway unless --force is given.
+        if (! $this->option('force') && ! $this->confirm("Soft-delete {$total} chats and {$msgCount} messages? (restorable with whatsapp:restore-broadcasts)")) {
+            $this->comment('Cancelled. Nothing was deleted.');
 
             return self::SUCCESS;
         }
