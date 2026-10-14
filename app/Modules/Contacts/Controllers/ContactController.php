@@ -137,7 +137,9 @@ class ContactController extends Controller
 
         // tag_list is saved directly in the contacts table (empty text clears it)
         if (array_key_exists('tags', $data) || array_key_exists('tag_list', $data)) {
+            $before = collect($contact->tagNames())->map(fn ($t) => mb_strtolower($t));
             $contact->update(['tag_list' => $this->tagText($data)]);
+            $this->fireTagAutomations($contact->fresh(), $before);
         }
 
         return $this->ok(['contact' => new ContactResource($contact->fresh(['assignedAgent']))]);
@@ -247,5 +249,36 @@ class ContactController extends Controller
             ->implode(', ');
 
         return $text === '' ? null : mb_substr($text, 0, 500);
+    }
+
+    /**
+     * Start tag_added / tag_removed workflows for the tags that actually changed.
+     * Best-effort — a dispatch failure must not break saving the contact.
+     *
+     * @param  \Illuminate\Support\Collection<int,string>  $before  lower-cased tags before the edit
+     */
+    private function fireTagAutomations(Contact $contact, $before): void
+    {
+        try {
+            $after = collect($contact->tagNames())->map(fn ($t) => mb_strtolower($t));
+            $added = $after->diff($before);
+            $removed = $before->diff($after);
+
+            if ($added->isEmpty() && $removed->isEmpty()) {
+                return;
+            }
+
+            $dispatcher = app(\App\Modules\Automation\Services\WorkflowDispatcher::class);
+            $conversation = $contact->conversations()->latest('id')->first();
+
+            foreach ($added as $tag) {
+                $dispatcher->fire($contact->tenant_id, 'tag_added', $contact, $conversation, ['tag' => $tag]);
+            }
+            foreach ($removed as $tag) {
+                $dispatcher->fire($contact->tenant_id, 'tag_removed', $contact, $conversation, ['tag' => $tag]);
+            }
+        } catch (\Throwable) {
+            // Swallow — automations are best-effort here.
+        }
     }
 }

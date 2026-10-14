@@ -17,3 +17,6 @@ Schedule::command('whatsapp:resume-sends')->everyMinute()->withoutOverlapping(30
 
 // Nudge quiet customers (two follow-ups, at +6h and +12h).
 Schedule::command('whatsapp:send-followups')->everyTenMinutes()->withoutOverlapping(20);
+
+// Drive automations: resume elapsed timed waits and fire scheduled workflows.
+Schedule::command('workflows:run')->everyMinute()->withoutOverlapping();

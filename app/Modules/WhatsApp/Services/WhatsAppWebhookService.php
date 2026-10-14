@@ -55,6 +55,8 @@ class WhatsAppWebhookService extends BaseService
             ]
         );
 
+        $isNewContact = $contact->wasRecentlyCreated;
+
         if ($profileName && ! $contact->name) {
             $contact->update(['name' => $profileName]);
         }
@@ -184,6 +186,24 @@ class WhatsAppWebhookService extends BaseService
                 ->evaluate($contact->fresh(), $conversation->fresh(), $msgType, $body);
         } catch (\Throwable $e) {
             $this->log($event, 'warning', 'hotlead.failed', 'Hot-lead detection error: ' . $e->getMessage());
+        }
+
+        // Automations (best-effort) — resume any run waiting on this reply, then
+        // fire the matching active workflows for this inbound message.
+        try {
+            $dispatcher = app(\App\Modules\Automation\Services\WorkflowDispatcher::class);
+            $freshContact = $contact->fresh();
+            $freshConv = $conversation->fresh();
+
+            $dispatcher->resumeOnReply($freshContact, $freshConv, (string) $body);
+
+            if ($isNewContact) {
+                $dispatcher->fire($tenantId, 'new_contact', $freshContact, $freshConv);
+            }
+            $dispatcher->fire($tenantId, 'incoming_message', $freshContact, $freshConv, ['body' => (string) $body]);
+            $dispatcher->fire($tenantId, 'keyword', $freshContact, $freshConv, ['body' => (string) $body]);
+        } catch (\Throwable $e) {
+            $this->log($event, 'warning', 'automation.failed', 'Automation dispatch error: ' . $e->getMessage());
         }
     }
 
