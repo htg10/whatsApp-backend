@@ -73,6 +73,9 @@ class AuthController extends Controller
             'name' => ['sometimes', 'string', 'max:255'],
             'email' => ['sometimes', 'email', 'max:255', 'unique:users,email,' . $request->user()->id],
             'phone' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'address' => ['sometimes', 'nullable', 'string', 'max:1000'],
+            // A data URL (data:image/...;base64,...) for the profile photo; capped ~2MB.
+            'avatar_url' => ['sometimes', 'nullable', 'string', 'max:3000000'],
         ]);
 
         $request->user()->update($data);

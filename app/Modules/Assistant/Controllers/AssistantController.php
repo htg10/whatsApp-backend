@@ -31,6 +31,7 @@ class AssistantController extends Controller
     {
         $data = $request->validate([
             'question' => ['required', 'string', 'max:1000'],
+            'language' => ['sometimes', 'string', 'max:20'],
         ]);
 
         $snapshot = $this->snapshot($request);
@@ -41,8 +42,8 @@ class AssistantController extends Controller
             'business and to this specific user\'s own view - treat it as the only truth.',
             'If the answer is not in the snapshot, say you do not have that information yet;',
             'never guess or invent numbers, names or amounts.',
-            'Be concise and friendly. Reply in the same language the user writes in',
-            '(English / Hindi / Hinglish). Use plain text - no markdown tables or headings.',
+            'Be concise and friendly. ' . $this->languageInstruction($data['language'] ?? 'en'),
+            'Use plain text - no markdown tables or headings.',
             '',
             'DATA SNAPSHOT (as of ' . now()->format('d M Y, H:i') . '):',
             $this->snapshotText($snapshot),
@@ -143,6 +144,22 @@ class AssistantController extends Controller
             'templates_pending' => (int) $tpl->pending,
             'templates_rejected' => (int) $tpl->rejected,
         ];
+    }
+
+    /** Turn the user's chosen language into an instruction for the model. */
+    private function languageInstruction(string $lang): string
+    {
+        return match (strtolower($lang)) {
+            'hi', 'hindi' => 'Reply in Hindi (Devanagari script).',
+            'hinglish' => 'Reply in Hinglish (Hindi written in Roman/English letters).',
+            'mr', 'marathi' => 'Reply in Marathi.',
+            'gu', 'gujarati' => 'Reply in Gujarati.',
+            'ta', 'tamil' => 'Reply in Tamil.',
+            'te', 'telugu' => 'Reply in Telugu.',
+            'bn', 'bengali' => 'Reply in Bengali.',
+            'pa', 'punjabi' => 'Reply in Punjabi.',
+            default => 'Reply in English.',
+        };
     }
 
     /** @param array<string, int|string> $s */
