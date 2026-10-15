@@ -22,24 +22,33 @@ class AiReplyService
 
     public function generate(Chatbot $chatbot, Conversation $conversation, string $incoming): ?string
     {
-        $provider = $this->resolveProvider();
-        if ($provider === null) {
+        $chain = $this->providerChain();
+        if ($chain === []) {
             Log::warning('AI reply skipped: no API key configured (set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env, then php artisan config:clear)');
             return null; // no AI key configured — skip AI, let caller use fallback
         }
-        Log::info('AI reply: using provider ' . $provider);
 
         $system = $this->systemPrompt($chatbot);
         $messages = $this->history($conversation, $incoming);
 
-        try {
-            return $provider === 'gemini'
-                ? $this->callGemini($system, $messages)
-                : $this->callAnthropic($system, $messages);
-        } catch (\Throwable $e) {
-            Log::warning('AI reply request failed: ' . $e->getMessage());
-            return null;
+        // Try each configured provider in order; if one fails (e.g. an invalid or
+        // expired key), fall through to the next instead of giving up silently.
+        foreach ($chain as $provider) {
+            try {
+                $reply = $provider === 'gemini'
+                    ? $this->callGemini($system, $messages)
+                    : $this->callAnthropic($system, $messages);
+                if ($reply) {
+                    Log::info('AI reply: answered via ' . $provider);
+                    return $reply;
+                }
+                Log::warning("AI reply: {$provider} returned nothing, trying next provider if any");
+            } catch (\Throwable $e) {
+                Log::warning("AI reply via {$provider} failed: " . $e->getMessage());
+            }
         }
+
+        return null;
     }
 
     /**
@@ -50,19 +59,20 @@ class AiReplyService
      */
     public function classify(string $system, array $messages): ?string
     {
-        $provider = $this->resolveProvider();
-        if ($provider === null) {
-            return null;
+        foreach ($this->providerChain() as $provider) {
+            try {
+                $reply = $provider === 'gemini'
+                    ? $this->callGemini($system, $messages)
+                    : $this->callAnthropic($system, $messages);
+                if ($reply) {
+                    return $reply;
+                }
+            } catch (\Throwable $e) {
+                Log::warning("AI classify via {$provider} failed: " . $e->getMessage());
+            }
         }
 
-        try {
-            return $provider === 'gemini'
-                ? $this->callGemini($system, $messages)
-                : $this->callAnthropic($system, $messages);
-        } catch (\Throwable $e) {
-            Log::warning('AI classify request failed: ' . $e->getMessage());
-            return null;
-        }
+        return null;
     }
 
     /**
@@ -72,8 +82,8 @@ class AiReplyService
      */
     public function describeMedia(Chatbot $chatbot, ?string $caption, string $bytes, string $mime): ?string
     {
-        $provider = $this->resolveProvider();
-        if ($provider === null) {
+        $chain = $this->providerChain();
+        if ($chain === []) {
             return null;
         }
 
@@ -92,33 +102,53 @@ class AiReplyService
             ? trim((string) $caption)
             : 'Please look at the attached file and tell me what it is about, and help me with it.';
 
-        try {
-            return $provider === 'gemini'
-                ? $this->callGeminiVision($system, $question, $bytes, $mime)
-                : $this->callAnthropicVision($system, $question, $bytes, $mime);
-        } catch (\Throwable $e) {
-            Log::warning('AI media request failed: ' . $e->getMessage());
-            return null;
+        foreach ($chain as $provider) {
+            try {
+                $reply = $provider === 'gemini'
+                    ? $this->callGeminiVision($system, $question, $bytes, $mime)
+                    : $this->callAnthropicVision($system, $question, $bytes, $mime);
+                if ($reply) {
+                    return $reply;
+                }
+            } catch (\Throwable $e) {
+                Log::warning("AI media via {$provider} failed: " . $e->getMessage());
+            }
         }
+
+        return null;
     }
 
-    /** Which provider to use: explicit config, else auto-detect by available key. */
-    private function resolveProvider(): ?string
+    /**
+     * Ordered list of providers to try. The preferred one (AI_PROVIDER) comes
+     * first; the other follows as a fallback. Only providers whose key is set are
+     * included — so a single configured key still works, and when both are set a
+     * failure on one rolls over to the other.
+     *
+     * @return array<int, string>
+     */
+    private function providerChain(): array
     {
-        $pref = config('services.ai.provider');
-        if ($pref === 'gemini' && config('services.gemini.key')) {
-            return 'gemini';
-        }
-        if ($pref === 'anthropic' && config('services.anthropic.key')) {
-            return 'anthropic';
-        }
+        $available = [];
         if (config('services.gemini.key')) {
-            return 'gemini';
+            $available['gemini'] = true;
         }
         if (config('services.anthropic.key')) {
-            return 'anthropic';
+            $available['anthropic'] = true;
         }
-        return null;
+        if ($available === []) {
+            return [];
+        }
+
+        $pref = config('services.ai.provider');
+        $order = $pref === 'anthropic' ? ['anthropic', 'gemini'] : ['gemini', 'anthropic'];
+
+        return array_values(array_filter($order, fn ($p) => isset($available[$p])));
+    }
+
+    /** Which providers currently have a key (for diagnostics). */
+    public function configuredProviders(): array
+    {
+        return $this->providerChain();
     }
 
     /** @param array<int, array{role:string, content:string}> $messages */
