@@ -110,11 +110,14 @@ class OtpService
             ->whereNotNull('phone')
             ->where('status', '!=', 'disabled');
 
-        // MySQL can match on the stripped number directly (fast). Other drivers
-        // (e.g. sqlite in tests) lack REGEXP_REPLACE, so match in PHP.
+        // MySQL/MariaDB: strip the common separators with nested REPLACE (works on
+        // every version — no REGEXP_REPLACE, which needs MySQL 8+) and compare the
+        // last 10 digits. Other drivers (sqlite in tests) match in PHP.
         if (DB::connection()->getDriverName() === 'mysql') {
+            $stripped = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),'(',''),')','')";
+
             return (clone $base)
-                ->whereRaw("RIGHT(REGEXP_REPLACE(phone, '[^0-9]', ''), 10) = ?", [$phone])
+                ->whereRaw("RIGHT($stripped, 10) = ?", [$phone])
                 ->orderByDesc('last_login_at')
                 ->first();
         }
