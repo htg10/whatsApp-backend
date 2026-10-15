@@ -19,6 +19,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function () {
     Route::get('/whatsapp/media/{uuid}', [\App\Modules\WhatsApp\Controllers\InboxController::class, 'media'])
         ->middleware('throttle:60,1');
 
+    // Public pricing for the marketing landing page (no auth).
+    Route::get('/public/plans', [\App\Modules\Billing\Controllers\PublicPlansController::class, 'index'])
+        ->middleware('throttle:60,1');
+
     // Auth module (public + auth:api-protected endpoints).
     require __DIR__ . '/modules/auth.php';
 
