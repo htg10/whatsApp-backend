@@ -56,13 +56,28 @@ class OtpSender
             return false;
         }
 
+        // Authentication templates (the recommended OTP type) need the code on BOTH
+        // the body and the copy-code/auto-fill button. Utility templates take only
+        // the body. Controlled by OTP_WHATSAPP_TYPE (default: authentication).
+        $components = [
+            ['type' => 'body', 'parameters' => [['type' => 'text', 'text' => $code]]],
+        ];
+        if (config('services.otp.whatsapp_type', 'authentication') === 'authentication') {
+            $components[] = [
+                'type' => 'button',
+                'sub_type' => config('services.otp.whatsapp_button_subtype', 'url'),
+                'index' => '0',
+                'parameters' => [['type' => 'text', 'text' => $code]],
+            ];
+        }
+
         try {
             $this->wa->sendTemplate(
                 $number,
                 $phone,
                 $template,
                 config('services.otp.whatsapp_lang', 'en'),
-                [['type' => 'body', 'parameters' => [['type' => 'text', 'text' => $code]]]],
+                $components,
             );
 
             return true;

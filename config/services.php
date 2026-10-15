@@ -65,8 +65,12 @@ return [
     // the user's own number — no extra provider), else MSG91 SMS. With neither set,
     // the code is only logged (fine for local/dev).
     'otp' => [
-        'whatsapp_template' => env('OTP_WHATSAPP_TEMPLATE'), // e.g. login_otp (body has {{1}} = code)
-        'whatsapp_lang'     => env('OTP_WHATSAPP_LANG', 'en'),
+        'whatsapp_template'        => env('OTP_WHATSAPP_TEMPLATE'), // e.g. login_otp
+        'whatsapp_lang'            => env('OTP_WHATSAPP_LANG', 'en'), // MUST match the template's language exactly (en vs en_US)
+        // 'authentication' (copy-code / auto-fill OTP template — recommended) adds
+        // the code to the button too; 'utility' sends only the body.
+        'whatsapp_type'            => env('OTP_WHATSAPP_TYPE', 'authentication'),
+        'whatsapp_button_subtype'  => env('OTP_WHATSAPP_BUTTON_SUBTYPE', 'url'),
     ],
     'msg91' => [
         'key'         => env('MSG91_AUTH_KEY'),

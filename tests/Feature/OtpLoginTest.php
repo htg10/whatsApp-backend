@@ -79,9 +79,13 @@ class OtpLoginTest extends TestCase
         $mock->shouldReceive('sendTemplate')
             ->once()
             ->withArgs(function ($phone, $to, $template, $lang, $components) {
+                $code = $components[0]['parameters'][0]['text'] ?? '';
+                // Authentication template: code on both the body and the button.
                 return $template === 'login_otp'
                     && $to === '919876543210'
-                    && preg_match('/^\d{6}$/', $components[0]['parameters'][0]['text']) === 1;
+                    && preg_match('/^\d{6}$/', $code) === 1
+                    && ($components[1]['type'] ?? '') === 'button'
+                    && ($components[1]['parameters'][0]['text'] ?? '') === $code;
             })
             ->andReturn(['messages' => [['id' => 'wamid.OTP']]]);
 
