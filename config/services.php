@@ -61,6 +61,19 @@ return [
         'key' => env('FCM_SERVER_KEY'),
     ],
 
+    // Mobile-OTP login delivery. Prefers WhatsApp (an approved template sent from
+    // the user's own number — no extra provider), else MSG91 SMS. With neither set,
+    // the code is only logged (fine for local/dev).
+    'otp' => [
+        'whatsapp_template' => env('OTP_WHATSAPP_TEMPLATE'), // e.g. login_otp (body has {{1}} = code)
+        'whatsapp_lang'     => env('OTP_WHATSAPP_LANG', 'en'),
+    ],
+    'msg91' => [
+        'key'         => env('MSG91_AUTH_KEY'),
+        'template_id' => env('MSG91_TEMPLATE_ID'),
+        'sender'      => env('MSG91_SENDER'),
+    ],
+
     'google' => [
         'client_id'     => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),

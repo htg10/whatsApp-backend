@@ -50,6 +50,21 @@ class AuthService extends BaseService
         return $this->tokenResponse($user, $token);
     }
 
+    /** Issue a token for a user who authenticated some other way (e.g. mobile OTP). */
+    public function loginViaUser(User $user): array
+    {
+        if ($user->status === 'disabled') {
+            throw ValidationException::withMessages([
+                'phone' => ['This account has been disabled.'],
+            ]);
+        }
+
+        $token = auth('api')->login($user);
+        $user->forceFill(['last_login_at' => now()])->saveQuietly();
+
+        return $this->tokenResponse($user, $token);
+    }
+
     public function logout(): void
     {
         auth('api')->logout();

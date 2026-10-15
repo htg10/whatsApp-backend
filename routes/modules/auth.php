@@ -15,6 +15,9 @@ Route::prefix('auth')->group(function () {
         Route::post('/login', [AuthController::class, 'login']);
         Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
         Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+        // Mobile-OTP login (alternative to email + password).
+        Route::post('/otp/request', [AuthController::class, 'requestOtp']);
+        Route::post('/otp/verify', [AuthController::class, 'verifyOtp']);
     });
 
     // Google OAuth (browser redirect flow — public, no auth:api).

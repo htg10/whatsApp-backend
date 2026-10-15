@@ -10,6 +10,7 @@ use App\Modules\Auth\Requests\RegisterRequest;
 use App\Modules\Auth\Requests\ResetPasswordRequest;
 use App\Modules\Auth\Resources\UserResource;
 use App\Modules\Auth\Services\AuthService;
+use App\Modules\Auth\Services\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -17,7 +18,41 @@ use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
-    public function __construct(private readonly AuthService $auth) {}
+    public function __construct(
+        private readonly AuthService $auth,
+        private readonly OtpService $otp,
+    ) {}
+
+    /** Send a one-time login code to a mobile number. */
+    public function requestOtp(Request $request): JsonResponse
+    {
+        $data = $request->validate(['phone' => ['required', 'string', 'max:20']]);
+
+        $result = $this->otp->request($data['phone']);
+
+        $payload = ['message' => 'If this number is registered, a login code has been sent.'];
+        if (! empty($result['dev_code'])) {
+            $payload['dev_code'] = $result['dev_code']; // local environment only
+        }
+
+        return $this->ok($payload);
+    }
+
+    /** Verify the code and log the user in. */
+    public function verifyOtp(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'phone' => ['required', 'string', 'max:20'],
+            'code' => ['required', 'string', 'size:6'],
+        ]);
+
+        $user = $this->otp->verify($data['phone'], $data['code']);
+        if (! $user) {
+            return $this->fail('That code is invalid or has expired. Please try again.', [], 422);
+        }
+
+        return $this->ok($this->authPayload($this->auth->loginViaUser($user)));
+    }
 
     public function register(RegisterRequest $request): JsonResponse
     {
