@@ -71,6 +71,10 @@ return [
         // the code to the button too; 'utility' sends only the body.
         'whatsapp_type'            => env('OTP_WHATSAPP_TYPE', 'authentication'),
         'whatsapp_button_subtype'  => env('OTP_WHATSAPP_BUTTON_SUBTYPE', 'url'),
+        // Send ALL login OTPs from this one number (its phone_number_id) so the
+        // template is approved on a single account. Unset = use each user's own
+        // tenant number.
+        'whatsapp_phone_number_id' => env('OTP_WHATSAPP_PHONE_NUMBER_ID'),
     ],
     'msg91' => [
         'key'         => env('MSG91_AUTH_KEY'),

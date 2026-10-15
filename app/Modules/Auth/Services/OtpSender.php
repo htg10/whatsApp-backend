@@ -48,10 +48,7 @@ class OtpSender
             return false;
         }
 
-        $number = WhatsappPhoneNumber::withoutGlobalScopes()
-            ->where('tenant_id', $user->tenant_id)
-            ->orderByDesc('is_default')
-            ->first();
+        $number = $this->senderNumber($user);
         if (! $number) {
             return false;
         }
@@ -86,6 +83,27 @@ class OtpSender
 
             return false;
         }
+    }
+
+    /**
+     * Which number sends the OTP. If OTP_WHATSAPP_PHONE_NUMBER_ID is set, every
+     * login code goes from that one platform number (so the template is approved
+     * on ONE account for all tenants). Otherwise it uses the user's own tenant's
+     * connected number.
+     */
+    private function senderNumber(User $user): ?WhatsappPhoneNumber
+    {
+        $platformId = config('services.otp.whatsapp_phone_number_id');
+        if ($platformId) {
+            return WhatsappPhoneNumber::withoutGlobalScopes()
+                ->where('phone_number_id', $platformId)
+                ->first();
+        }
+
+        return WhatsappPhoneNumber::withoutGlobalScopes()
+            ->where('tenant_id', $user->tenant_id)
+            ->orderByDesc('is_default')
+            ->first();
     }
 
     private function sendViaMsg91(string $phone, string $code): bool
