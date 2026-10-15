@@ -46,12 +46,16 @@ class AuthController extends Controller
             'code' => ['required', 'string', 'size:6'],
         ]);
 
-        $user = $this->otp->verify($data['phone'], $data['code']);
-        if (! $user) {
+        $result = $this->otp->verify($data['phone'], $data['code']);
+
+        if ($result === 'no_account') {
+            return $this->fail('This mobile number is not linked to any account. Save it on your profile (or sign in with email), then try again.', [], 422);
+        }
+        if (! ($result instanceof \App\Models\User)) {
             return $this->fail('That code is invalid or has expired. Please try again.', [], 422);
         }
 
-        return $this->ok($this->authPayload($this->auth->loginViaUser($user)));
+        return $this->ok($this->authPayload($this->auth->loginViaUser($result)));
     }
 
     public function register(RegisterRequest $request): JsonResponse

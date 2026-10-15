@@ -54,13 +54,17 @@ class OtpService
             $this->sender->send($user, $phone, $code);
         }
 
-        // Echo the code back only in local/testing so developers (and the test
-        // suite) can complete the flow without a live SMS/WhatsApp channel.
-        return ['dev_code' => app()->environment(['local', 'testing']) ? $code : null];
+        // Echo the code back only in local/testing AND only when it can actually
+        // log someone in — so a dev never sees a code for an unregistered number.
+        return ['dev_code' => ($user && app()->environment(['local', 'testing'])) ? $code : null];
     }
 
-    /** Verify a code; returns the matching user on success, or null. */
-    public function verify(string $rawPhone, string $code): ?User
+    /**
+     * Verify a code. Returns the matching User on success, or a reason string:
+     *   'invalid'    — no live code, too many attempts, or wrong code
+     *   'no_account' — the code was right but no user has this number
+     */
+    public function verify(string $rawPhone, string $code): User|string
     {
         $phone = $this->normalize($rawPhone);
 
@@ -71,18 +75,20 @@ class OtpService
             ->first();
 
         if (! $otp || $otp->attempts >= self::MAX_ATTEMPTS) {
-            return null;
+            return 'invalid';
         }
 
         $otp->increment('attempts');
 
         if (! Hash::check($code, $otp->code_hash)) {
-            return null;
+            return 'invalid';
         }
 
         $otp->update(['consumed_at' => now()]);
 
-        return $this->findUserByPhone($phone);
+        $user = $this->findUserByPhone($phone);
+
+        return $user ?? 'no_account';
     }
 
     /** Digits only; keeps the trailing 10 (local number) as the match key. */
