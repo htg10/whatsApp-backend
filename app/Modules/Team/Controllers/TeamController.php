@@ -202,6 +202,7 @@ class TeamController extends Controller
             'id' => $u->uuid,
             'name' => $u->name,
             'email' => $u->email,
+            'avatar_url' => $u->avatar_url,
             'status' => $u->status,
             'role' => $roleKey,
             'role_label' => $roleKey === 'admin' ? 'Admin' : 'Agent',
