@@ -18,7 +18,8 @@ class AiReplyService
 {
     private const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
-    private const HISTORY_LIMIT = 10;
+    // Fewer history turns = smaller prompt = faster first token (lower reply latency).
+    private const HISTORY_LIMIT = 6;
 
     public function generate(Chatbot $chatbot, Conversation $conversation, string $incoming): ?string
     {
@@ -167,7 +168,8 @@ class AiReplyService
             ->post($url, [
                 'system_instruction' => ['parts' => [['text' => $system]]],
                 'contents' => $contents,
-                'generationConfig' => ['maxOutputTokens' => 600, 'temperature' => 0.7],
+                // WhatsApp replies are short; a lower cap keeps generation quick.
+                'generationConfig' => ['maxOutputTokens' => 400, 'temperature' => 0.7],
             ]);
 
         if ($res->failed()) {

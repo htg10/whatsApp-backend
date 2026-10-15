@@ -180,31 +180,42 @@ class WhatsAppWebhookService extends BaseService
             $this->log($event, 'warning', 'push.failed', 'Push notification error: ' . $e->getMessage());
         }
 
-        // Hot-lead detection (best-effort) — flags contacts who show buying interest.
-        try {
-            app(\App\Modules\Chatbot\Services\HotLeadDetector::class)
-                ->evaluate($contact->fresh(), $conversation->fresh(), $msgType, $body);
-        } catch (\Throwable $e) {
-            $this->log($event, 'warning', 'hotlead.failed', 'Hot-lead detection error: ' . $e->getMessage());
-        }
+        // Hot-lead detection and automations each make their own (sometimes AI)
+        // calls. They don't need to block the customer's reply — the chatbot reply
+        // was already sent above — so run them AFTER the webhook responds. This
+        // keeps the reply fast and the webhook well under Meta's retry timeout.
+        $contactId = $contact->id;
+        $conversationId = $conversation->id;
+        $bodyText = (string) $body;
+        $type = $msgType;
+        $isNew = $isNewContact;
 
-        // Automations (best-effort) — resume any run waiting on this reply, then
-        // fire the matching active workflows for this inbound message.
-        try {
-            $dispatcher = app(\App\Modules\Automation\Services\WorkflowDispatcher::class);
-            $freshContact = $contact->fresh();
-            $freshConv = $conversation->fresh();
-
-            $dispatcher->resumeOnReply($freshContact, $freshConv, (string) $body);
-
-            if ($isNewContact) {
-                $dispatcher->fire($tenantId, 'new_contact', $freshContact, $freshConv);
+        app()->terminating(function () use ($tenantId, $contactId, $conversationId, $bodyText, $type, $isNew) {
+            $contact = Contact::withoutGlobalScopes()->find($contactId);
+            $conversation = Conversation::withoutGlobalScopes()->find($conversationId);
+            if (! $contact || ! $conversation) {
+                return;
             }
-            $dispatcher->fire($tenantId, 'incoming_message', $freshContact, $freshConv, ['body' => (string) $body]);
-            $dispatcher->fire($tenantId, 'keyword', $freshContact, $freshConv, ['body' => (string) $body]);
-        } catch (\Throwable $e) {
-            $this->log($event, 'warning', 'automation.failed', 'Automation dispatch error: ' . $e->getMessage());
-        }
+
+            try {
+                app(\App\Modules\Chatbot\Services\HotLeadDetector::class)
+                    ->evaluate($contact, $conversation, $type, $bodyText);
+            } catch (\Throwable $e) {
+                Log::warning('Hot-lead detection error: ' . $e->getMessage());
+            }
+
+            try {
+                $dispatcher = app(\App\Modules\Automation\Services\WorkflowDispatcher::class);
+                $dispatcher->resumeOnReply($contact, $conversation, $bodyText);
+                if ($isNew) {
+                    $dispatcher->fire($tenantId, 'new_contact', $contact, $conversation);
+                }
+                $dispatcher->fire($tenantId, 'incoming_message', $contact, $conversation, ['body' => $bodyText]);
+                $dispatcher->fire($tenantId, 'keyword', $contact, $conversation, ['body' => $bodyText]);
+            } catch (\Throwable $e) {
+                Log::warning('Automation dispatch error: ' . $e->getMessage());
+            }
+        });
     }
 
     public function handleStatusUpdate(WebhookEvent $event): void
