@@ -4,6 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\LoginOtp;
 use App\Models\User;
+use App\Models\WhatsappBusinessAccount;
+use App\Models\WhatsappPhoneNumber;
+use App\Modules\WhatsApp\Services\WhatsAppMessageService;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -57,6 +60,32 @@ class OtpLoginTest extends TestCase
 
         $this->postJson('/api/v1/auth/otp/verify', ['phone' => '9876543210', 'code' => $code])
             ->assertStatus(422);
+    }
+
+    public function test_otp_is_delivered_via_whatsapp_when_a_template_is_configured(): void
+    {
+        config(['services.otp.whatsapp_template' => 'login_otp', 'services.otp.whatsapp_lang' => 'en']);
+
+        $tenantId = User::withoutGlobalScopes()->where('email', 'owner@acme.test')->value('tenant_id');
+        $waba = WhatsappBusinessAccount::create(['tenant_id' => $tenantId, 'waba_id' => '100', 'name' => 'Biz']);
+        WhatsappPhoneNumber::create([
+            'tenant_id' => $tenantId, 'whatsapp_business_account_id' => $waba->id,
+            'phone_number_id' => '200', 'display_phone_number' => '+91 90000 00000', 'is_default' => true,
+        ]);
+
+        // Expect the OTP to be sent as the configured template, with the code as
+        // the body parameter, to the user's own number.
+        $mock = $this->mock(WhatsAppMessageService::class);
+        $mock->shouldReceive('sendTemplate')
+            ->once()
+            ->withArgs(function ($phone, $to, $template, $lang, $components) {
+                return $template === 'login_otp'
+                    && $to === '919876543210'
+                    && preg_match('/^\d{6}$/', $components[0]['parameters'][0]['text']) === 1;
+            })
+            ->andReturn(['messages' => [['id' => 'wamid.OTP']]]);
+
+        $this->postJson('/api/v1/auth/otp/request', ['phone' => '919876543210'])->assertOk();
     }
 
     public function test_unknown_number_cannot_log_in_even_with_the_right_code(): void
