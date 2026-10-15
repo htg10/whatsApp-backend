@@ -23,14 +23,20 @@ class OtpSender
 
     public function send(?User $user, string $phone, string $code): bool
     {
-        if ($this->sendViaWhatsApp($user, $phone, $code)) {
+        // Deliver to the FULL number on the user's account (with country code), not
+        // the stripped 10-digit match key — WhatsApp/SMS need the country code.
+        $to = $user && $user->phone
+            ? preg_replace('/\D+/', '', $user->phone)
+            : $phone;
+
+        if ($this->sendViaWhatsApp($user, $to, $code)) {
             return true;
         }
-        if ($this->sendViaMsg91($phone, $code)) {
+        if ($this->sendViaMsg91($to, $code)) {
             return true;
         }
 
-        Log::info("Login OTP for {$phone}: {$code} (no delivery channel configured — set OTP_WHATSAPP_TEMPLATE or MSG91_AUTH_KEY)");
+        Log::info("Login OTP for {$to}: {$code} (no delivery channel configured — set OTP_WHATSAPP_TEMPLATE or MSG91_AUTH_KEY)");
 
         return false;
     }
