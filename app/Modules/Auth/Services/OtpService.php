@@ -54,9 +54,9 @@ class OtpService
             $this->sender->send($user, $phone, $code);
         }
 
-        // Echo the code back only in local/testing AND only when it can actually
-        // log someone in — so a dev never sees a code for an unregistered number.
-        return ['dev_code' => ($user && app()->environment(['local', 'testing'])) ? $code : null];
+        // In local/testing, echo the code back so developers can complete the flow
+        // without a live SMS/WhatsApp channel. (Never in production.)
+        return ['dev_code' => app()->environment(['local', 'testing']) ? $code : null];
     }
 
     /**

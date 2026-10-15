@@ -59,16 +59,15 @@ class OtpLoginTest extends TestCase
             ->assertStatus(422);
     }
 
-    public function test_unknown_number_gets_no_code_and_cannot_log_in(): void
+    public function test_unknown_number_cannot_log_in_even_with_the_right_code(): void
     {
-        // No enumeration: the request still returns OK, but no code is issued for
-        // a number that belongs to no account (not even the dev code).
-        $this->postJson('/api/v1/auth/otp/request', ['phone' => '9000000000'])
-            ->assertOk()
-            ->assertJsonMissingPath('data.dev_code');
+        // The request looks successful (no enumeration). In local/testing the code
+        // is echoed for convenience, but it belongs to no account...
+        $code = $this->postJson('/api/v1/auth/otp/request', ['phone' => '9000000000'])
+            ->assertOk()->json('data.dev_code');
 
-        // And verifying any code for it fails clearly, not as a generic error.
-        $this->postJson('/api/v1/auth/otp/verify', ['phone' => '9000000000', 'code' => '123456'])
+        // ...so even the correct code can't log anyone in.
+        $this->postJson('/api/v1/auth/otp/verify', ['phone' => '9000000000', 'code' => $code])
             ->assertStatus(422);
     }
 }
