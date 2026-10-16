@@ -63,7 +63,7 @@ class ChatbotController extends Controller
             'fallback_message' => ['nullable', 'string'],
             'is_active' => ['sometimes', 'boolean'],
             'ai_enabled' => ['sometimes', 'boolean'],
-            'ai_instructions' => ['nullable', 'string', 'max:8000'],
+            'ai_instructions' => ['nullable', 'string', 'max:2000000'],
             'followup_enabled' => ['sometimes', 'boolean'],
             'followup_message' => ['nullable', 'string', 'max:1000'],
         ]);
@@ -101,7 +101,7 @@ class ChatbotController extends Controller
             'fallback_message' => ['nullable', 'string'],
             'is_active' => ['sometimes', 'boolean'],
             'ai_enabled' => ['sometimes', 'boolean'],
-            'ai_instructions' => ['nullable', 'string', 'max:8000'],
+            'ai_instructions' => ['nullable', 'string', 'max:2000000'],
             'followup_enabled' => ['sometimes', 'boolean'],
             'followup_message' => ['nullable', 'string', 'max:1000'],
         ]);
