@@ -29,7 +29,7 @@ class SocialController extends Controller
             'facebook_app_id' => config('services.meta.app_id'),
             // Facebook Login for Business configuration id (if set) — required when
             // the app uses "Facebook Login for Business" instead of classic login.
-            'facebook_config_id' => config('services.meta.config_id'),
+            'facebook_config_id' => config('services.meta.social_config_id'),
             'api_version' => config('services.meta.api_version', 'v23.0'),
         ]);
     }

@@ -8,7 +8,8 @@ return [
         'app_secrets'       => array_filter(array_map('trim', explode(',', env('META_APP_SECRETS', '')))),
         'verify_tokens'     => array_filter(array_map('trim', explode(',', env('META_VERIFY_TOKENS', '')))),
         'api_version'       => env('META_API_VERSION', 'v23.0'),
-        'config_id'         => env('META_CONFIG_ID'),
+        'config_id'         => env('META_CONFIG_ID'), // WhatsApp Embedded Signup config
+        'social_config_id'  => env('META_SOCIAL_CONFIG_ID'), // Facebook Login for Business (social publishing)
         // System User token is the production credential. Encrypted at rest per WABA
         // in the DB; this env value is a fallback/bootstrap only.
         'system_user_token' => env('META_SYSTEM_USER_TOKEN'),
