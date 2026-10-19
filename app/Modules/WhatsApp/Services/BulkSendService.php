@@ -354,6 +354,33 @@ class BulkSendService extends BaseService
         $this->syncProgress($bulkSend);
     }
 
+    /**
+     * A delivery-status webhook reported a bulk message as failed. Move that
+     * recipient from "sent" to "failed" and recount, so the bulk-send Sent/Failed
+     * columns reflect what Meta actually delivered (not just what it accepted).
+     */
+    public function markRecipientFailed(string $wamid, ?string $reason = null): void
+    {
+        if ($wamid === '') {
+            return;
+        }
+
+        $recipient = BulkSendRecipient::withoutGlobalScopes()->where('wamid', $wamid)->first();
+        if (! $recipient || $recipient->status === 'failed') {
+            return;
+        }
+
+        $recipient->update([
+            'status' => 'failed',
+            'error_message' => Str::limit($reason ?: 'Not delivered by WhatsApp', 500),
+        ]);
+
+        $bulkSend = BulkSend::withoutGlobalScopes()->find($recipient->bulk_send_id);
+        if ($bulkSend) {
+            $this->syncProgress($bulkSend);
+        }
+    }
+
     /** Recount from recipients, finish the send when nothing is pending, and bump the heartbeat. */
     private function syncProgress(BulkSend $bulkSend): void
     {

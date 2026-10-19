@@ -287,6 +287,17 @@ class WhatsAppWebhookService extends BaseService
             $message->update($updates);
         }
 
+        // Keep bulk-send progress honest: when Meta reports a bulk message as
+        // failed, move that recipient from sent -> failed and recount the send.
+        if ($statusName === 'failed') {
+            try {
+                app(\App\Modules\WhatsApp\Services\BulkSendService::class)
+                    ->markRecipientFailed($wamid, $statusData['errors'][0]['title'] ?? null);
+            } catch (\Throwable $e) {
+                $this->log($event, 'warning', 'bulksend.status', 'Bulk recipient status update failed: ' . $e->getMessage());
+            }
+        }
+
         $this->log($event, 'info', 'status.updated', "Status {$statusName} for wamid: {$wamid}");
     }
 

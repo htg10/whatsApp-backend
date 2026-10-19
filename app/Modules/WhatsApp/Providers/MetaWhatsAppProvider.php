@@ -117,8 +117,16 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
 
     public function uploadTemplateMedia(string $appId, string $content, string $mime, string $fileName): string
     {
+        // The resumable upload lives on the APP (/{app_id}/uploads), so it must be
+        // authenticated as the app. Using the WABA's system-user token produces a
+        // handle the template-create can't resolve ("object does not exist / missing
+        // permissions"). Use the app access token (app_id|app_secret) when we have
+        // the secret; otherwise fall back to the configured token.
+        $appSecret = config('services.meta.app_secret');
+        $uploadToken = $appSecret ? ($appId . '|' . $appSecret) : $this->token;
+
         // Meta resumable upload (two steps). Step 1: start a session.
-        $start = Http::withToken($this->token)->baseUrl($this->baseUrl)->acceptJson()->timeout($this->timeout)
+        $start = Http::withToken($uploadToken)->baseUrl($this->baseUrl)->acceptJson()->timeout($this->timeout)
             ->post("/{$appId}/uploads", [
                 'file_name' => $fileName,
                 'file_length' => strlen($content),
@@ -135,7 +143,7 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
         }
 
         // Step 2: upload the bytes; Meta returns the handle in "h".
-        $upload = Http::withHeaders(['Authorization' => 'OAuth ' . $this->token, 'file_offset' => '0'])
+        $upload = Http::withHeaders(['Authorization' => 'OAuth ' . $uploadToken, 'file_offset' => '0'])
             ->baseUrl($this->baseUrl)->timeout(max($this->timeout, 60))
             ->withBody($content, $mime)
             ->post("/{$sessionId}");

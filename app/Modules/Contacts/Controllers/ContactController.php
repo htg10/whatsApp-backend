@@ -53,6 +53,19 @@ class ContactController extends Controller
             $query->where('opted_out', true);
         }
 
+        // Default list: show only contacts the business has actually chatted with
+        // (hide raw cold imports that were never messaged). Search and the special
+        // lists (hot / blocked / opted-out / a tag) stay full so nothing is lost.
+        $isSpecialView = $search
+            || $request->query('tag')
+            || $request->query('hot') === '1'
+            || $request->query('blocked') === '1'
+            || $request->query('opted_out') === '1'
+            || $request->query('all') === '1';
+        if (! $isSpecialView) {
+            $query->whereHas('conversations');
+        }
+
         $contacts = $query->paginate($request->integer('per_page', 25));
 
         return $this->ok([
