@@ -23,6 +23,8 @@ Route::prefix('auth')->group(function () {
     // Google OAuth (browser redirect flow — public, no auth:api).
     Route::get('/google/redirect', [GoogleAuthController::class, 'redirect']);
     Route::get('/google/callback', [GoogleAuthController::class, 'callback']);
+    // Mobile app only: swaps the one-time code from the callback for a login (rate-limited like /login).
+    Route::post('/google/exchange', [GoogleAuthController::class, 'exchange'])->middleware('throttle:10,1');
 
     Route::middleware('auth:api')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);

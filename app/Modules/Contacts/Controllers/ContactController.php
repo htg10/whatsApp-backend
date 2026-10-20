@@ -22,15 +22,20 @@ class ContactController extends Controller
             $safe = '%' . $this->escapeLike($search) . '%';
             $query->where(function ($q) use ($safe) {
                 $q->where('name', 'like', $safe)
-                  ->orWhere('phone', 'like', $safe)
-                  ->orWhere('wa_id', 'like', $safe)
-                  ->orWhere('email', 'like', $safe)
-                  ->orWhere('tag_list', 'like', $safe);
+                    ->orWhere('phone', 'like', $safe)
+                    ->orWhere('wa_id', 'like', $safe)
+                    ->orWhere('email', 'like', $safe)
+                    ->orWhere('tag_list', 'like', $safe);
             });
         }
 
         if ($tag = $request->query('tag')) {
-            $query->whereHas('tags', fn ($q) => $q->where('tags.uuid', $tag));
+            $query->whereHas('tags', fn($q) => $q->where('tags.uuid', $tag));
+        }
+
+        // ?tag_name=VIP: contacts that carry that tag in tag_list (whole tags only, see Contact::scopeWithTag).
+        if ($tagName = $request->query('tag_name')) {
+            $query->withTag((string) $tagName);
         }
 
         if ($request->query('hot') === '1') {
@@ -58,11 +63,12 @@ class ContactController extends Controller
         // lists (hot / blocked / opted-out / a tag) stay full so nothing is lost.
         $isSpecialView = $search
             || $request->query('tag')
+            || $request->query('tag_name')
             || $request->query('hot') === '1'
             || $request->query('blocked') === '1'
             || $request->query('opted_out') === '1'
             || $request->query('all') === '1';
-        if (! $isSpecialView) {
+        if (!$isSpecialView) {
             $query->whereHas('conversations');
         }
 
@@ -76,6 +82,40 @@ class ContactController extends Controller
                 'total' => $contacts->total(),
             ],
         ]);
+    }
+
+    /**
+     * The tags that are actually in use, with how many contacts carry each one: [{ name, contacts_count }].
+     * Read from contacts.tag_list (where contact tags really live), unlike /tags which reads a separate table.
+     */
+    public function tagNames(): JsonResponse
+    {
+        $this->authorize('contacts.view');
+
+        $counts = [];
+        foreach (Contact::query()->whereNotNull('tag_list')->where('tag_list', '!=', '')->pluck('tag_list') as $list) {
+            // A contact is counted once per tag, however often the tag is written; tags match regardless of case.
+            $seen = [];
+            foreach (preg_split('/[,;|]/', (string) $list) as $raw) {
+                $name = trim($raw);
+                $key = mb_strtolower($name);
+                if ($name === '' || isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $counts[$key] = [
+                    'name' => $counts[$key]['name'] ?? $name,
+                    'contacts_count' => ($counts[$key]['contacts_count'] ?? 0) + 1,
+                ];
+            }
+        }
+
+        $tags = collect($counts)
+            ->sortBy([['contacts_count', 'desc'], ['name', 'asc']])
+            ->values()
+            ->all();
+
+        return $this->ok(['tags' => $tags]);
     }
 
     public function show(string $uuid): JsonResponse
@@ -146,11 +186,11 @@ class ContactController extends Controller
             'tag_list' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $contact->update(collect($data)->except(['tags', 'tag_list'])->filter(fn ($v) => $v !== null)->all());
+        $contact->update(collect($data)->except(['tags', 'tag_list'])->filter(fn($v) => $v !== null)->all());
 
         // tag_list is saved directly in the contacts table (empty text clears it)
         if (array_key_exists('tags', $data) || array_key_exists('tag_list', $data)) {
-            $before = collect($contact->tagNames())->map(fn ($t) => mb_strtolower($t));
+            $before = collect($contact->tagNames())->map(fn($t) => mb_strtolower($t));
             $contact->update(['tag_list' => $this->tagText($data)]);
             $this->fireTagAutomations($contact->fresh(), $before);
         }
@@ -200,7 +240,7 @@ class ContactController extends Controller
                 ->where('tenant_id', $tenantId)
                 ->where('wa_id', $waId)
                 ->first();
-                
+
 
             if ($contact) {
                 if ($contact->trashed()) {
@@ -210,7 +250,7 @@ class ContactController extends Controller
                     'name' => $row['name'] ?? null,
                     'email' => $row['email'] ?? null,
                     'company' => $row['company'] ?? null,
-                ], fn ($v) => $v !== null));
+                ], fn($v) => $v !== null));
                 $updated++;
             } else {
                 $contact = Contact::create([
@@ -256,9 +296,9 @@ class ContactController extends Controller
         }
 
         $text = collect(preg_split('/[,;|]/', (string) $raw))
-            ->map(fn ($n) => trim($n))
+            ->map(fn($n) => trim($n))
             ->filter()
-            ->unique(fn ($n) => mb_strtolower($n))
+            ->unique(fn($n) => mb_strtolower($n))
             ->implode(', ');
 
         return $text === '' ? null : mb_substr($text, 0, 500);
@@ -273,7 +313,7 @@ class ContactController extends Controller
     private function fireTagAutomations(Contact $contact, $before): void
     {
         try {
-            $after = collect($contact->tagNames())->map(fn ($t) => mb_strtolower($t));
+            $after = collect($contact->tagNames())->map(fn($t) => mb_strtolower($t));
             $added = $after->diff($before);
             $removed = $before->diff($after);
 

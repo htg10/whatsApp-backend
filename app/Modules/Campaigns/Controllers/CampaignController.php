@@ -14,7 +14,9 @@ use Illuminate\Http\Request;
 
 class CampaignController extends Controller
 {
-    public function __construct(private readonly CampaignSendService $sender) {}
+    public function __construct(private readonly CampaignSendService $sender)
+    {
+    }
 
     public function index(Request $request): JsonResponse
     {
@@ -65,7 +67,7 @@ class CampaignController extends Controller
             ->with('contact:id,uuid,name,phone')
             ->paginate(25);
 
-        $contactItems = $contacts->getCollection()->map(fn ($cc) => [
+        $contactItems = $contacts->getCollection()->map(fn($cc) => [
             'id' => $cc->id,
             'status' => $cc->status,
             'contact' => $cc->contact ? [
@@ -105,7 +107,7 @@ class CampaignController extends Controller
         app(\App\Modules\Billing\Services\PlanLimitService::class)->assertWithinLimit($tenantId, 'max_campaigns', 'campaigns', 'campaigns');
 
         $template = \App\Models\Template::where('uuid', $data['template_id'])->first();
-        if (! $template) {
+        if (!$template) {
             throw \Illuminate\Validation\ValidationException::withMessages([
                 'template_id' => ['That template could not be found. Sync your templates and try again.'],
             ]);
@@ -114,7 +116,7 @@ class CampaignController extends Controller
         // Prefer the default number; fall back to any active number.
         $phone = WhatsappPhoneNumber::where('is_default', true)->first()
             ?? WhatsappPhoneNumber::whereIn('status', ['connected', 'registered'])->first();
-        if (! $phone) {
+        if (!$phone) {
             throw \Illuminate\Validation\ValidationException::withMessages([
                 'template_id' => ['No active WhatsApp number found. Please connect and register a WhatsApp number on the WhatsApp page before creating a campaign.'],
             ]);
@@ -128,10 +130,10 @@ class CampaignController extends Controller
 
         $audienceFilter = $data['audience_filter'] ?? [];
 
+        // Contact tags are stored as text in contacts.tag_list (the contact_tag pivot is never filled), so the
+        // audience is matched on that text: a contact with ANY of the chosen tags is included.
         if (!empty($audienceFilter['tags'])) {
-            $audienceQuery->whereHas('tags', function ($q) use ($audienceFilter) {
-                $q->whereIn('tags.name', $audienceFilter['tags']);
-            });
+            $audienceQuery->withAnyTag($audienceFilter['tags']);
         }
 
         if (!empty($audienceFilter['source'])) {

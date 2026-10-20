@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\Concerns\HasUuid;
 use App\Support\Concerns\TracksBlame;
 use App\Support\Scopes\BelongsToTenant;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -72,6 +73,41 @@ class Contact extends Model
         $score = "CAST(COALESCE(JSON_UNQUOTE(JSON_EXTRACT({$t}.meta, '$.hot.score')), 0) AS UNSIGNED)";
 
         return "CASE WHEN {$isHot} THEN COALESCE(NULLIF({$score}, 0), 50) ELSE 0 END";
+    }
+
+    /**
+     * Scope: contacts that carry $tag in the plain-text tag_list column.
+     *
+     * Contact tags live in tag_list ("VIP, New Delhi"), NOT in the contact_tag pivot table, so the old
+     * whereHas('tags') never matched anyone. This compares whole tags only (the same normalisation the Hot list
+     * uses: separators become commas, spaces are dropped), so "VIP" never matches a name or a phone number.
+     * $table = the contacts table alias.
+     */
+    public function scopeWithTag(Builder $query, string $tag, string $table = 'contacts'): Builder
+    {
+        $needle = str_replace([' ', ',', ';', '|'], '', trim($tag));
+        if ($needle === '') {
+            return $query->whereRaw('1 = 0');
+        }
+
+        $normalised = "CONCAT(',', REPLACE(REPLACE(REPLACE(REPLACE(COALESCE({$table}.tag_list, ''), ', ', ','), ';', ','), '|', ','), ' ', ''), ',')";
+
+        return $query->whereRaw("{$normalised} LIKE ?", ['%,' . addcslashes($needle, '%_\\') . ',%']);
+    }
+
+    /** Scope: contacts that carry at least one of $tags (empty list = no restriction). */
+    public function scopeWithAnyTag(Builder $query, array $tags, string $table = 'contacts'): Builder
+    {
+        $tags = array_values(array_filter(array_map('strval', $tags), fn ($t) => trim($t) !== ''));
+        if ($tags === []) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $q) use ($tags, $table) {
+            foreach ($tags as $tag) {
+                $q->orWhere(fn (Builder $inner) => $inner->withTag($tag, $table));
+            }
+        });
     }
 
     /** Why the AI marked this contact hot (stored in meta.hot). */
