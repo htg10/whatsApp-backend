@@ -269,7 +269,14 @@ class WhatsAppWebhookService extends BaseService
         $currentOrder = $statusOrder[$message->status] ?? 0;
         $newOrder = $statusOrder[$statusName] ?? 0;
 
-        if ($newOrder > $currentOrder || $statusName === 'failed') {
+        // A late/stray `failed` event must NOT drag a message that already reached
+        // the device back to "failed" — otherwise delivered/read messages get
+        // mis-counted as failures (this is what inflated Analytics to 1602 failed
+        // while Meta showed them delivered). Apply `failed` only when the message
+        // has not yet reached `delivered`. Every event is still logged above.
+        $failedOverride = $statusName === 'failed' && $currentOrder < $statusOrder['delivered'];
+
+        if ($newOrder > $currentOrder || $failedOverride) {
             $updates = ['status' => $statusName];
 
             match ($statusName) {
@@ -287,9 +294,11 @@ class WhatsAppWebhookService extends BaseService
             $message->update($updates);
         }
 
-        // Keep bulk-send progress honest: when Meta reports a bulk message as
-        // failed, move that recipient from sent -> failed and recount the send.
-        if ($statusName === 'failed') {
+        // Keep bulk-send progress honest: when Meta reports a bulk message as a
+        // genuine non-delivery (it never reached the device), move that recipient
+        // from sent -> failed and recount. Skip stray failures on messages that
+        // already delivered/read so we don't under-count successful sends.
+        if ($failedOverride) {
             try {
                 app(\App\Modules\WhatsApp\Services\BulkSendService::class)
                     ->markRecipientFailed($wamid, $statusData['errors'][0]['title'] ?? null);
