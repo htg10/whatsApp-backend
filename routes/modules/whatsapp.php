@@ -37,6 +37,7 @@ Route::prefix('whatsapp')->group(function () {
     // Bulk send
     Route::get('/bulk-sends', [BulkSendController::class, 'index']);
     Route::get('/bulk-sends/{uuid}', [BulkSendController::class, 'show']);
+    Route::delete('/bulk-sends/{uuid}', [BulkSendController::class, 'destroy']);
     Route::post('/bulk-sends/{uuid}/retry', [BulkSendController::class, 'retry']);
     Route::post('/bulk-send', [BulkSendController::class, 'store']);
     Route::post('/bulk-send/upload-header', [BulkSendController::class, 'uploadHeader']);

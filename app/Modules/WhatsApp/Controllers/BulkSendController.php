@@ -176,6 +176,25 @@ class BulkSendController extends Controller
         return $this->ok(['bulk_send' => $result]);
     }
 
+    /** Delete a bulk send and its recipient rows (history cleanup). */
+    public function destroy(string $uuid): JsonResponse
+    {
+        $this->authorize('whatsapp.manage');
+
+        $send = BulkSend::where('uuid', $uuid)->firstOrFail();
+
+        // Don't delete a run that is still sending — let it finish or fail first,
+        // so a background worker never references a deleted send.
+        if ($send->status === 'processing') {
+            return $this->fail('This bulk send is still processing. Please wait for it to finish before deleting.', [], 422);
+        }
+
+        $send->recipients()->delete();
+        $send->delete();
+
+        return $this->ok(['message' => 'Bulk send deleted.']);
+    }
+
     /** HEADER format (TEXT/IMAGE/VIDEO/DOCUMENT) of a template, or null if none. */
     private function templateHeaderFormat(int $tenantId, string $name, ?string $language): ?string
     {

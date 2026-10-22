@@ -310,4 +310,33 @@ class BulkSendTest extends TestCase
         $bulk->syncRecipientStatus('wamid-OK', 'failed', 'late failure', '131049');
         $this->assertSame('delivered', BulkSendRecipient::where('wamid', 'wamid-OK')->value('status'));
     }
+
+    public function test_delete_removes_a_bulk_send_and_its_recipients(): void
+    {
+        $phone = WhatsappPhoneNumber::withoutGlobalScopes()->firstOrFail();
+        $send = BulkSend::create([
+            'tenant_id' => $phone->tenant_id, 'whatsapp_phone_number_id' => $phone->id,
+            'template_name' => 'promo', 'language' => 'en', 'status' => 'completed',
+            'total' => 1, 'sent_count' => 0, 'failed_count' => 1,
+        ]);
+        BulkSendRecipient::create(['bulk_send_id' => $send->id, 'phone' => '919000000001', 'status' => 'failed']);
+
+        $this->authed()->deleteJson("/api/v1/whatsapp/bulk-sends/{$send->uuid}")->assertOk();
+
+        $this->assertDatabaseMissing('bulk_sends', ['id' => $send->id]);
+        $this->assertSame(0, BulkSendRecipient::where('bulk_send_id', $send->id)->count());
+    }
+
+    public function test_cannot_delete_a_processing_bulk_send(): void
+    {
+        $phone = WhatsappPhoneNumber::withoutGlobalScopes()->firstOrFail();
+        $send = BulkSend::create([
+            'tenant_id' => $phone->tenant_id, 'whatsapp_phone_number_id' => $phone->id,
+            'template_name' => 'promo', 'language' => 'en', 'status' => 'processing',
+            'total' => 1, 'sent_count' => 0, 'failed_count' => 0,
+        ]);
+
+        $this->authed()->deleteJson("/api/v1/whatsapp/bulk-sends/{$send->uuid}")->assertStatus(422);
+        $this->assertDatabaseHas('bulk_sends', ['id' => $send->id]);
+    }
 }
