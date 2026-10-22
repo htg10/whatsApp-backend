@@ -21,9 +21,13 @@ class BulkSendController extends Controller
     {
         $this->authorize('whatsapp.manage');
 
+        // delivered_count = recipients Meta actually delivered (a subset of
+        // sent_count, which also includes accepted-but-not-yet-confirmed). The
+        // UI shows both so "Sent" vs "Delivered" is clear.
         $sends = BulkSend::with('phoneNumber')
+            ->withCount(['recipients as delivered_count' => fn ($q) => $q->where('status', 'delivered')])
             ->orderByDesc('created_at')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate($request->integer('per_page', 15));
 
         foreach ($sends->items() as $send) {
             if ($this->service->claimIfStalled($send)) {
@@ -45,7 +49,9 @@ class BulkSendController extends Controller
     {
         $this->authorize('whatsapp.manage');
 
-        $send = BulkSend::where('uuid', $uuid)->firstOrFail();
+        $send = BulkSend::where('uuid', $uuid)
+            ->withCount(['recipients as delivered_count' => fn ($q) => $q->where('status', 'delivered')])
+            ->firstOrFail();
 
         if ($this->service->claimIfStalled($send)) {
             $this->service->continueAfterResponse($send);
@@ -164,8 +170,10 @@ class BulkSendController extends Controller
 
         $send = BulkSend::where('uuid', $uuid)->firstOrFail();
         $result = $this->service->retryFailed($send);
+        $result->load(['phoneNumber', 'recipients'])
+            ->loadCount(['recipients as delivered_count' => fn ($q) => $q->where('status', 'delivered')]);
 
-        return $this->ok(['bulk_send' => $result->load(['phoneNumber', 'recipients'])]);
+        return $this->ok(['bulk_send' => $result]);
     }
 
     /** HEADER format (TEXT/IMAGE/VIDEO/DOCUMENT) of a template, or null if none. */
