@@ -234,6 +234,22 @@ class WhatsAppWebhookService extends BaseService
             return;
         }
 
+        // Reconcile bulk-send recipients with Meta's real delivery FIRST — before
+        // the Message lookup below — because a cold/bulk recipient usually has no
+        // inbox Message row, and we must still move it sent -> delivered/failed so
+        // the bulk-send Sent/Failed columns match Meta Insights (not just what Meta
+        // accepted at send time). Best-effort: never let this break status intake.
+        try {
+            app(\App\Modules\WhatsApp\Services\BulkSendService::class)->syncRecipientStatus(
+                $wamid,
+                $statusName,
+                $statusData['errors'][0]['title'] ?? null,
+                isset($statusData['errors'][0]['code']) ? (string) $statusData['errors'][0]['code'] : null,
+            );
+        } catch (\Throwable $e) {
+            $this->log($event, 'warning', 'bulksend.status', 'Bulk recipient status update failed: ' . $e->getMessage());
+        }
+
         $message = Message::withoutGlobalScopes()
             ->where('external_message_id', $wamid)
             ->first();
@@ -292,19 +308,6 @@ class WhatsAppWebhookService extends BaseService
             };
 
             $message->update($updates);
-        }
-
-        // Keep bulk-send progress honest: when Meta reports a bulk message as a
-        // genuine non-delivery (it never reached the device), move that recipient
-        // from sent -> failed and recount. Skip stray failures on messages that
-        // already delivered/read so we don't under-count successful sends.
-        if ($failedOverride) {
-            try {
-                app(\App\Modules\WhatsApp\Services\BulkSendService::class)
-                    ->markRecipientFailed($wamid, $statusData['errors'][0]['title'] ?? null);
-            } catch (\Throwable $e) {
-                $this->log($event, 'warning', 'bulksend.status', 'Bulk recipient status update failed: ' . $e->getMessage());
-            }
         }
 
         $this->log($event, 'info', 'status.updated', "Status {$statusName} for wamid: {$wamid}");

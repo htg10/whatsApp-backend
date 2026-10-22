@@ -279,4 +279,35 @@ class BulkSendTest extends TestCase
         $this->assertSame('sent', BulkSendRecipient::where('bulk_send_id', $send->id)
             ->where('phone', '919000000002')->value('status'));
     }
+
+    public function test_delivery_webhook_marks_a_cold_recipient_failed_and_recounts(): void
+    {
+        $phone = WhatsappPhoneNumber::withoutGlobalScopes()->firstOrFail();
+        $send = BulkSend::create([
+            'tenant_id' => $phone->tenant_id, 'whatsapp_phone_number_id' => $phone->id,
+            'template_name' => 'promo', 'language' => 'en', 'status' => 'completed',
+            'total' => 2, 'sent_count' => 2, 'failed_count' => 0,
+        ]);
+        BulkSendRecipient::create(['bulk_send_id' => $send->id, 'phone' => '919000000001', 'status' => 'sent', 'wamid' => 'wamid-OK']);
+        BulkSendRecipient::create(['bulk_send_id' => $send->id, 'phone' => '919000000002', 'status' => 'sent', 'wamid' => 'wamid-CAP']);
+
+        $bulk = app(\App\Modules\WhatsApp\Services\BulkSendService::class);
+
+        // Meta reports the second one as a non-delivery (e.g. frequency cap) —
+        // there is NO inbox Message for either (cold numbers).
+        $bulk->syncRecipientStatus('wamid-CAP', 'failed', 'Not delivered', '131049');
+        // ...and the first one delivered.
+        $bulk->syncRecipientStatus('wamid-OK', 'delivered');
+
+        $this->assertSame('failed', BulkSendRecipient::where('wamid', 'wamid-CAP')->value('status'));
+        $this->assertSame('delivered', BulkSendRecipient::where('wamid', 'wamid-OK')->value('status'));
+
+        $send->refresh();
+        $this->assertSame(1, $send->sent_count);   // only the delivered one counts as sent
+        $this->assertSame(1, $send->failed_count); // the capped one is now failed
+
+        // A stray failure after delivery must NOT drag the delivered one back.
+        $bulk->syncRecipientStatus('wamid-OK', 'failed', 'late failure', '131049');
+        $this->assertSame('delivered', BulkSendRecipient::where('wamid', 'wamid-OK')->value('status'));
+    }
 }

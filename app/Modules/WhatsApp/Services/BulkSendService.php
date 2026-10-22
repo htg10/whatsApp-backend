@@ -355,30 +355,65 @@ class BulkSendService extends BaseService
     }
 
     /**
-     * A delivery-status webhook reported a bulk message as failed. Move that
-     * recipient from "sent" to "failed" and recount, so the bulk-send Sent/Failed
-     * columns reflect what Meta actually delivered (not just what it accepted).
+     * Apply a delivery-status webhook to a bulk recipient, keyed by wamid, so the
+     * bulk-send Sent/Failed columns reflect what Meta ACTUALLY delivered — not
+     * just what Meta accepted at send time.
+     *
+     * Why this matters: a recipient is marked "sent" the moment Meta's API returns
+     * a wamid (accepted). But cold/invalid numbers, or marketing hitting the
+     * per-user frequency cap, are accepted and then NOT delivered — Meta later
+     * sends a `failed` status webhook. Without this, those stay "sent" forever and
+     * the bulk send over-reports (e.g. "198 sent / 0 failed" while Meta delivered
+     * a handful). This runs for EVERY recipient, even cold numbers that have no
+     * inbox message, so it is called directly from the webhook (not gated behind a
+     * Message lookup).
+     *
+     * Status model on the recipient: pending → sent (accepted) → delivered, or
+     * → failed. A `delivered`/`read` event wins and is never dragged back to
+     * failed by a later stray event (a delivered message reached the device).
      */
-    public function markRecipientFailed(string $wamid, ?string $reason = null): void
+    public function syncRecipientStatus(string $wamid, string $statusName, ?string $reason = null, ?string $errorCode = null): bool
     {
         if ($wamid === '') {
-            return;
+            return false;
+        }
+
+        $new = match ($statusName) {
+            'delivered', 'read' => 'delivered',
+            'failed' => 'failed',
+            default => null, // 'sent' etc. — the recipient is already 'sent'
+        };
+        if ($new === null) {
+            return false;
         }
 
         $recipient = BulkSendRecipient::withoutGlobalScopes()->where('wamid', $wamid)->first();
-        if (! $recipient || $recipient->status === 'failed') {
-            return;
+        if (! $recipient) {
+            return false;
         }
 
-        $recipient->update([
-            'status' => 'failed',
-            'error_message' => Str::limit($reason ?: 'Not delivered by WhatsApp', 500),
-        ]);
+        // Already settled the same way, or already delivered and this is a stray
+        // failure — leave it (delivered is a success that reached the device).
+        if ($recipient->status === $new) {
+            return false;
+        }
+        if ($recipient->status === 'delivered' && $new === 'failed') {
+            return false;
+        }
+
+        $update = ['status' => $new];
+        if ($new === 'failed') {
+            $update['error_message'] = Str::limit($reason ?: 'Not delivered by WhatsApp', 500);
+            $update['error_code'] = $errorCode;
+        }
+        $recipient->update($update);
 
         $bulkSend = BulkSend::withoutGlobalScopes()->find($recipient->bulk_send_id);
         if ($bulkSend) {
             $this->syncProgress($bulkSend);
         }
+
+        return true;
     }
 
     /** Recount from recipients, finish the send when nothing is pending, and bump the heartbeat. */
