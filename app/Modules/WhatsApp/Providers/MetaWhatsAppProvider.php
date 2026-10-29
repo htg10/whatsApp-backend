@@ -115,7 +115,7 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
                 ->post("/{$phoneNumberId}/media", ['messaging_product' => 'whatsapp', 'type' => $mime]));
     }
 
-    public function uploadTemplateMedia(string $appId, string $content, string $mime, string $fileName): string
+    public function uploadTemplateMedia(string $appId, string $content, string $mime, string $fileName, ?string $wabaId = null): string
     {
         // The resumable upload ( /{app_id}/uploads ) returns a handle that Meta can
         // only resolve at template-create time when it was created under the SAME
@@ -125,9 +125,13 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
         // "Object with ID ... does not exist, cannot be loaded due to missing
         // permissions" when the template is created.
         //
-        // So resolve the app id from the WABA's own token and upload with that
-        // token; only fall back to the configured app id + app access token.
-        $resolvedAppId = $this->appIdForToken() ?: $appId;
+        // The reliable way to learn that app is the WABA's subscribed app
+        // (/{waba_id}/subscribed_apps) — it works even for a customer's own token,
+        // unlike debug_token self-introspection, which returns nothing for them.
+        // Upload with the WABA's own token so the handle lands under that app.
+        $resolvedAppId = ($wabaId ? $this->appIdForWaba($wabaId) : null)
+            ?: $this->appIdForToken()
+            ?: $appId;
         $appSecret = config('services.meta.app_secret');
         // The WABA token belongs to $resolvedAppId, so use it. Only when the WABA
         // is on our configured app do we use that app's access token instead.
@@ -183,6 +187,25 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
                 ->get('/debug_token', ['input_token' => $this->token, 'access_token' => $this->token]);
 
             $id = $res->json('data.app_id');
+
+            return $id ? (string) $id : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The Meta app that manages a WABA, from /{waba_id}/subscribed_apps, using the
+     * WABA's own token. This is the app a template is created under, so a media
+     * handle must be uploaded under it too. Returns null if it can't be read.
+     */
+    private function appIdForWaba(string $wabaId): ?string
+    {
+        try {
+            $res = Http::withToken($this->token)->baseUrl($this->baseUrl)->acceptJson()->timeout($this->timeout)
+                ->get("/{$wabaId}/subscribed_apps");
+
+            $id = $res->json('data.0.whatsapp_business_api_data.id');
 
             return $id ? (string) $id : null;
         } catch (\Throwable) {

@@ -197,6 +197,7 @@ class TemplateController extends Controller
                 file_get_contents($file->getRealPath()),
                 $file->getMimeType() ?: 'application/octet-stream',
                 $file->getClientOriginalName() ?: 'sample',
+                $waba->waba_id,
             );
         } catch (\Throwable $e) {
             return $this->fail('Could not upload the sample to Meta: ' . $e->getMessage(), [], 422);
