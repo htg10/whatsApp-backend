@@ -88,9 +88,7 @@ class TemplateController extends Controller
         $tenantId = $request->user()->tenant_id;
         app(\App\Modules\Billing\Services\PlanLimitService::class)->assertWithinLimit($tenantId, 'max_templates', 'templates', 'templates');
 
-        $waba = WhatsappBusinessAccount::where('tenant_id', $tenantId)
-            ->when($data['waba_id'] ?? null, fn ($q, $id) => $q->where('uuid', $id)->orWhere('waba_id', $id))
-            ->first();
+        $waba = $this->resolveWaba($tenantId, $data['waba_id'] ?? null);
 
         if (! $waba) {
             return $this->fail('Connect a WhatsApp Business account before creating templates.', [], 422);
@@ -176,9 +174,7 @@ class TemplateController extends Controller
         ]);
 
         $tenantId = $request->user()->tenant_id;
-        $waba = WhatsappBusinessAccount::where('tenant_id', $tenantId)
-            ->when($data['waba_id'] ?? null, fn ($q, $id) => $q->where('uuid', $id)->orWhere('waba_id', $id))
-            ->first();
+        $waba = $this->resolveWaba($tenantId, $data['waba_id'] ?? null);
 
         if (! $waba) {
             return $this->fail('Connect a WhatsApp Business account before uploading a sample.', [], 422);
@@ -224,6 +220,24 @@ class TemplateController extends Controller
         $template->delete();
 
         return $this->ok(['message' => 'Template deleted.']);
+    }
+
+    /**
+     * Pick the WABA to act on. A tenant can accumulate several WABA records from
+     * reconnecting (old ones point at WABA IDs Meta has since deleted — every call
+     * on them returns "Object ... does not exist"). So prefer a CONNECTED account
+     * and the most recent one, instead of blindly taking the oldest row. An
+     * explicit id (uuid or waba_id) still wins, matched inside a nested where so
+     * tenant isolation is never broken by the OR.
+     */
+    private function resolveWaba(int $tenantId, ?string $wabaId): ?WhatsappBusinessAccount
+    {
+        return WhatsappBusinessAccount::where('tenant_id', $tenantId)
+            ->when($wabaId, fn ($q, $id) => $q->where(fn ($w) => $w->where('uuid', $id)->orWhere('waba_id', $id)))
+            ->orderByRaw("CASE WHEN status = 'connected' THEN 0 ELSE 1 END")
+            ->orderByDesc('connected_at')
+            ->orderByDesc('id')
+            ->first();
     }
 
     /** Map the structured request into Meta's Graph "components" array. */
