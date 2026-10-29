@@ -119,7 +119,17 @@ class TemplateController extends Controller
         try {
             $result = $this->factory->for($waba)->createTemplate($waba->waba_id, $payload);
         } catch (\Throwable $e) {
-            return $this->fail('Meta rejected the template: ' . $e->getMessage(), [], 422);
+            $msg = 'Meta rejected the template: ' . $e->getMessage();
+            // The classic "Object with ID ... does not exist / missing permissions"
+            // means the stored WhatsApp Business Account ID is wrong, or the token
+            // can't manage it. Point the user straight at the cause.
+            if (str_contains($e->getMessage(), 'does not exist') || str_contains($e->getMessage(), 'missing permissions')) {
+                $msg .= " — this is your WhatsApp Business Account ID ({$waba->waba_id}). "
+                    . 'Check it matches the WABA ID in Meta Business Settings and reconnect the number if it is wrong. '
+                    . 'Run `php artisan whatsapp:diagnose-template` for the exact cause.';
+            }
+
+            return $this->fail($msg, [], 422);
         }
 
         $template = Template::create([
