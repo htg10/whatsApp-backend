@@ -240,6 +240,37 @@ class TemplateController extends Controller
             ->first();
     }
 
+    /**
+     * Normalise a Call-button phone number to E.164 (+countrycode…), which Meta
+     * requires — otherwise it rejects the template with
+     * "(#192) ... ['phone_number'] is not a valid phone number". Forgiving about
+     * what the user types: spaces/dashes, a leading 0, a bare 10-digit Indian
+     * mobile (→ +91), or an already-correct +number all become valid.
+     */
+    private function normalizeButtonPhone(string $raw): string
+    {
+        $raw = trim($raw);
+        $hasPlus = str_starts_with($raw, '+');
+        $digits = preg_replace('/\D/', '', $raw) ?? '';
+
+        if ($digits === '') {
+            return $raw;
+        }
+
+        if (! $hasPlus) {
+            // 0XXXXXXXXXX → drop the trunk 0, then treat as a bare Indian mobile.
+            if (strlen($digits) === 11 && $digits[0] === '0') {
+                $digits = substr($digits, 1);
+            }
+            // Bare 10-digit mobile → assume India (+91); this platform is India-first.
+            if (strlen($digits) === 10) {
+                $digits = '91' . $digits;
+            }
+        }
+
+        return '+' . $digits;
+    }
+
     /** Map the structured request into Meta's Graph "components" array. */
     private function buildComponents(array $data): array
     {
@@ -275,7 +306,7 @@ class TemplateController extends Controller
                 if ($b['type'] === 'URL' && ! empty($b['url'])) {
                     $btn['url'] = $b['url'];
                 } elseif ($b['type'] === 'PHONE_NUMBER' && ! empty($b['phone_number'])) {
-                    $btn['phone_number'] = $b['phone_number'];
+                    $btn['phone_number'] = $this->normalizeButtonPhone($b['phone_number']);
                 } elseif ($b['type'] === 'COPY_CODE') {
                     $btn['example'] = [$b['example'] ?? $b['text']];
                 }
