@@ -117,17 +117,27 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
 
     public function uploadTemplateMedia(string $appId, string $content, string $mime, string $fileName): string
     {
-        // The resumable upload lives on the APP (/{app_id}/uploads), so it must be
-        // authenticated as the app. Using the WABA's system-user token produces a
-        // handle the template-create can't resolve ("object does not exist / missing
-        // permissions"). Use the app access token (app_id|app_secret) when we have
-        // the secret; otherwise fall back to the configured token.
+        // The resumable upload ( /{app_id}/uploads ) returns a handle that Meta can
+        // only resolve at template-create time when it was created under the SAME
+        // Meta app that owns the WABA. Embedded-signup WABAs belong to our
+        // configured app, but a manually-connected WABA belongs to the customer's
+        // OWN app — uploading under the wrong app id is exactly what produces
+        // "Object with ID ... does not exist, cannot be loaded due to missing
+        // permissions" when the template is created.
+        //
+        // So resolve the app id from the WABA's own token and upload with that
+        // token; only fall back to the configured app id + app access token.
+        $resolvedAppId = $this->appIdForToken() ?: $appId;
         $appSecret = config('services.meta.app_secret');
-        $uploadToken = $appSecret ? ($appId . '|' . $appSecret) : $this->token;
+        // The WABA token belongs to $resolvedAppId, so use it. Only when the WABA
+        // is on our configured app do we use that app's access token instead.
+        $uploadToken = ($resolvedAppId === $appId && $appSecret)
+            ? ($appId . '|' . $appSecret)
+            : $this->token;
 
         // Meta resumable upload (two steps). Step 1: start a session.
         $start = Http::withToken($uploadToken)->baseUrl($this->baseUrl)->acceptJson()->timeout($this->timeout)
-            ->post("/{$appId}/uploads", [
+            ->post("/{$resolvedAppId}/uploads", [
                 'file_name' => $fileName,
                 'file_length' => strlen($content),
                 'file_type' => $mime,
@@ -158,6 +168,26 @@ class MetaWhatsAppProvider implements WhatsAppProviderInterface
         }
 
         return $handle;
+    }
+
+    /**
+     * The Meta app id that $this->token belongs to, read from /debug_token. We
+     * inspect the token with itself (the universal way that also works for a
+     * customer's own app), so a media handle is created under the WABA's real app.
+     * Returns null if it cannot be determined (caller falls back to the config).
+     */
+    private function appIdForToken(): ?string
+    {
+        try {
+            $res = Http::baseUrl($this->baseUrl)->acceptJson()->timeout($this->timeout)
+                ->get('/debug_token', ['input_token' => $this->token, 'access_token' => $this->token]);
+
+            $id = $res->json('data.app_id');
+
+            return $id ? (string) $id : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public function downloadMedia(string $mediaId): array
