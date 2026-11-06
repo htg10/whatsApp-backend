@@ -23,4 +23,6 @@ Route::prefix('admin')->middleware('super_admin')->group(function () {
 
     Route::get('/settings', [SettingsController::class, 'show']);
     Route::put('/settings', [SettingsController::class, 'update']);
+    Route::get('/ai-settings', [SettingsController::class, 'showAi']);
+    Route::put('/ai-settings', [SettingsController::class, 'updateAi']);
 });

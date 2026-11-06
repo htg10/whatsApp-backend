@@ -57,6 +57,12 @@ return [
         'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
     ],
 
+    'openai' => [
+        'key'   => env('OPENAI_API_KEY'),
+        // Low-cost default for a WhatsApp chatbot; override with OPENAI_MODEL.
+        'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
+    ],
+
     // Mobile push. Expo needs no key; legacy FCM needs FCM_SERVER_KEY.
     'fcm' => [
         'key' => env('FCM_SERVER_KEY'),

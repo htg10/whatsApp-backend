@@ -2,6 +2,7 @@
 
 namespace App\Modules\Chatbot\Services;
 
+use App\Models\AiSetting;
 use App\Models\Chatbot;
 use App\Models\Conversation;
 use App\Models\Message;
@@ -10,16 +11,23 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Generates an AI reply for a chatbot using the business's own instructions as
- * context. Supports two providers over plain HTTP (same pattern as the app's
- * other integrations): Google Gemini and Anthropic Claude. Returns null when AI
- * is unavailable/misconfigured so the caller can fall back gracefully.
+ * context. Supports three providers over plain HTTP: Google Gemini, OpenAI and
+ * Anthropic Claude. The preferred provider, whether AI is enabled at all, and
+ * the API keys all come from the Super Admin's AI settings (ai_settings table),
+ * falling back to .env. Returns null when AI is unavailable/misconfigured so the
+ * caller can fall back gracefully.
  */
 class AiReplyService
 {
     private const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
+    private const OPENAI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+    private const PROVIDERS = ['gemini', 'openai', 'anthropic'];
     // Fewer history turns = smaller prompt = faster first token (lower reply latency).
     private const HISTORY_LIMIT = 6;
+
+    private ?AiSetting $settings = null;
+    private bool $settingsLoaded = false;
 
     public function generate(Chatbot $chatbot, Conversation $conversation, string $incoming): ?string
     {
@@ -36,9 +44,7 @@ class AiReplyService
         // expired key), fall through to the next instead of giving up silently.
         foreach ($chain as $provider) {
             try {
-                $reply = $provider === 'gemini'
-                    ? $this->callGemini($system, $messages)
-                    : $this->callAnthropic($system, $messages);
+                $reply = $this->callText($provider, $system, $messages);
                 if ($reply) {
                     Log::info('AI reply: answered via ' . $provider);
                     return $reply;
@@ -62,9 +68,7 @@ class AiReplyService
     {
         foreach ($this->providerChain() as $provider) {
             try {
-                $reply = $provider === 'gemini'
-                    ? $this->callGemini($system, $messages)
-                    : $this->callAnthropic($system, $messages);
+                $reply = $this->callText($provider, $system, $messages);
                 if ($reply) {
                     return $reply;
                 }
@@ -105,9 +109,7 @@ class AiReplyService
 
         foreach ($chain as $provider) {
             try {
-                $reply = $provider === 'gemini'
-                    ? $this->callGeminiVision($system, $question, $bytes, $mime)
-                    : $this->callAnthropicVision($system, $question, $bytes, $mime);
+                $reply = $this->callVision($provider, $system, $question, $bytes, $mime);
                 if ($reply) {
                     return $reply;
                 }
@@ -117,6 +119,28 @@ class AiReplyService
         }
 
         return null;
+    }
+
+    /** Dispatch a text completion to the chosen provider. */
+    private function callText(string $provider, string $system, array $messages): ?string
+    {
+        return match ($provider) {
+            'gemini' => $this->callGemini($system, $messages),
+            'openai' => $this->callOpenAi($system, $messages),
+            'anthropic' => $this->callAnthropic($system, $messages),
+            default => null,
+        };
+    }
+
+    /** Dispatch an image/PDF understanding call to the chosen provider. */
+    private function callVision(string $provider, string $system, string $question, string $bytes, string $mime): ?string
+    {
+        return match ($provider) {
+            'gemini' => $this->callGeminiVision($system, $question, $bytes, $mime),
+            'openai' => $this->callOpenAiVision($system, $question, $bytes, $mime),
+            'anthropic' => $this->callAnthropicVision($system, $question, $bytes, $mime),
+            default => null,
+        };
     }
 
     /**
@@ -129,19 +153,26 @@ class AiReplyService
      */
     private function providerChain(): array
     {
-        $available = [];
-        if (config('services.gemini.key')) {
-            $available['gemini'] = true;
+        // AI can be switched off entirely from the admin settings.
+        $settings = $this->settings();
+        if ($settings && ! $settings->enabled) {
+            return [];
         }
-        if (config('services.anthropic.key')) {
-            $available['anthropic'] = true;
+
+        $available = [];
+        foreach (self::PROVIDERS as $p) {
+            if (($this->keyFor($p) ?? '') !== '') {
+                $available[$p] = true;
+            }
         }
         if ($available === []) {
             return [];
         }
 
-        $pref = config('services.ai.provider');
-        $order = $pref === 'anthropic' ? ['anthropic', 'gemini'] : ['gemini', 'anthropic'];
+        // Preferred provider (admin setting, else .env) first; the rest follow as
+        // fallbacks so one key still works and a failure rolls over to another.
+        $pref = $settings?->provider ?: (config('services.ai.provider') ?: 'gemini');
+        $order = array_merge([$pref], array_values(array_diff(self::PROVIDERS, [$pref])));
 
         return array_values(array_filter($order, fn ($p) => isset($available[$p])));
     }
@@ -152,16 +183,63 @@ class AiReplyService
         return $this->providerChain();
     }
 
+    /** The singleton AI settings row, or null if unavailable (e.g. pre-migration). */
+    private function settings(): ?AiSetting
+    {
+        if (! $this->settingsLoaded) {
+            $this->settingsLoaded = true;
+            try {
+                $this->settings = AiSetting::current();
+            } catch (\Throwable) {
+                $this->settings = null;
+            }
+        }
+
+        return $this->settings;
+    }
+
+    /** API key for a provider: admin setting first, then .env. */
+    private function keyFor(string $provider): ?string
+    {
+        $key = $this->settings()?->keyFor($provider);
+        if (($key ?? '') !== '') {
+            return $key;
+        }
+
+        return match ($provider) {
+            'gemini' => config('services.gemini.key'),
+            'openai' => config('services.openai.key'),
+            'anthropic' => config('services.anthropic.key'),
+            default => null,
+        };
+    }
+
+    /** Model for a provider: admin setting first, then .env, then a sane default. */
+    private function modelFor(string $provider): string
+    {
+        $model = $this->settings()?->modelFor($provider);
+        if (($model ?? '') !== '') {
+            return $model;
+        }
+
+        return match ($provider) {
+            'gemini' => config('services.gemini.model', 'gemini-2.5-flash'),
+            'openai' => config('services.openai.model', 'gpt-4o-mini'),
+            'anthropic' => config('services.anthropic.model', 'claude-opus-5'),
+            default => '',
+        };
+    }
+
     /** @param array<int, array{role:string, content:string}> $messages */
     private function callGemini(string $system, array $messages): ?string
     {
-        $model = config('services.gemini.model', 'gemini-3.8-flash');
+        $model = $this->modelFor('gemini');
         $contents = array_map(fn ($m) => [
             'role' => $m['role'] === 'assistant' ? 'model' : 'user',
             'parts' => [['text' => $m['content']]],
         ], $messages);
 
-        $apiKey = config('services.gemini.key');
+        $apiKey = $this->keyFor('gemini');
         $url = self::GEMINI_ENDPOINT . $model . ':generateContent?key=' . urlencode($apiKey);
 
         $res = Http::timeout(30)
@@ -184,8 +262,8 @@ class AiReplyService
 
     private function callGeminiVision(string $system, string $question, string $bytes, string $mime): ?string
     {
-        $model = config('services.gemini.model', 'gemini-1.5-flash');
-        $apiKey = config('services.gemini.key');
+        $model = $this->modelFor('gemini');
+        $apiKey = $this->keyFor('gemini');
         $url = self::GEMINI_ENDPOINT . $model . ':generateContent?key=' . urlencode($apiKey);
 
         $res = Http::timeout(45)->post($url, [
@@ -217,11 +295,11 @@ class AiReplyService
             : ['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => $mime, 'data' => base64_encode($bytes)]];
 
         $res = Http::withHeaders([
-            'x-api-key' => config('services.anthropic.key'),
+            'x-api-key' => $this->keyFor('anthropic'),
             'anthropic-version' => '2023-06-01',
             'content-type' => 'application/json',
         ])->timeout(45)->post(self::ANTHROPIC_ENDPOINT, [
-            'model' => config('services.anthropic.model', 'claude-opus-5'),
+            'model' => $this->modelFor('anthropic'),
             'max_tokens' => 700,
             'system' => $system,
             'messages' => [[
@@ -248,11 +326,11 @@ class AiReplyService
     private function callAnthropic(string $system, array $messages): ?string
     {
         $res = Http::withHeaders([
-            'x-api-key' => config('services.anthropic.key'),
+            'x-api-key' => $this->keyFor('anthropic'),
             'anthropic-version' => '2023-06-01',
             'content-type' => 'application/json',
         ])->timeout(30)->post(self::ANTHROPIC_ENDPOINT, [
-            'model' => config('services.anthropic.model', 'claude-opus-5'),
+            'model' => $this->modelFor('anthropic'),
             'max_tokens' => 600,
             'system' => $system,
             'output_config' => ['effort' => 'low'], // quick, chat-style replies
@@ -272,6 +350,59 @@ class AiReplyService
         }
 
         return null;
+    }
+
+    /** @param array<int, array{role:string, content:string}> $messages */
+    private function callOpenAi(string $system, array $messages): ?string
+    {
+        $res = Http::withToken((string) $this->keyFor('openai'))
+            ->timeout(30)->post(self::OPENAI_ENDPOINT, [
+                'model' => $this->modelFor('openai'),
+                'messages' => array_merge([['role' => 'system', 'content' => $system]], $messages),
+                'max_tokens' => 600,
+                'temperature' => 0.7,
+            ]);
+
+        if ($res->failed()) {
+            Log::warning('OpenAI reply API error', ['status' => $res->status(), 'body' => $res->json('error.message')]);
+            return null;
+        }
+
+        $text = $res->json('choices.0.message.content');
+
+        return $text ? trim($text) : null;
+    }
+
+    private function callOpenAiVision(string $system, string $question, string $bytes, string $mime): ?string
+    {
+        // OpenAI chat vision understands images; PDFs are not accepted here.
+        if (! str_starts_with($mime, 'image/')) {
+            return null;
+        }
+
+        $dataUrl = 'data:' . $mime . ';base64,' . base64_encode($bytes);
+
+        $res = Http::withToken((string) $this->keyFor('openai'))
+            ->timeout(45)->post(self::OPENAI_ENDPOINT, [
+                'model' => $this->modelFor('openai'),
+                'max_tokens' => 700,
+                'messages' => [
+                    ['role' => 'system', 'content' => $system],
+                    ['role' => 'user', 'content' => [
+                        ['type' => 'text', 'text' => $question],
+                        ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]],
+                    ]],
+                ],
+            ]);
+
+        if ($res->failed()) {
+            Log::warning('OpenAI vision API error', ['status' => $res->status(), 'body' => $res->json('error.message')]);
+            return null;
+        }
+
+        $text = $res->json('choices.0.message.content');
+
+        return $text ? trim($text) : null;
     }
 
     private function systemPrompt(Chatbot $chatbot): string
