@@ -17,10 +17,16 @@ class AiSetting extends Model
         'provider', 'enabled',
         'gemini_key', 'openai_key', 'anthropic_key',
         'gemini_model', 'openai_model', 'anthropic_model',
+        'gemini_price_in', 'gemini_price_out',
+        'openai_price_in', 'openai_price_out',
+        'anthropic_price_in', 'anthropic_price_out',
     ];
 
     protected $casts = [
         'enabled' => 'boolean',
+        'gemini_price_in' => 'float', 'gemini_price_out' => 'float',
+        'openai_price_in' => 'float', 'openai_price_out' => 'float',
+        'anthropic_price_in' => 'float', 'anthropic_price_out' => 'float',
         // Never stored or exposed in plain text.
         'gemini_key' => 'encrypted',
         'openai_key' => 'encrypted',
@@ -52,6 +58,17 @@ class AiSetting extends Model
             'openai' => $this->openai_model,
             'anthropic' => $this->anthropic_model,
             default => null,
+        };
+    }
+
+    /** [input ₹/1M, output ₹/1M] for a provider. */
+    public function priceFor(string $provider): array
+    {
+        return match ($provider) {
+            'gemini' => [(float) $this->gemini_price_in, (float) $this->gemini_price_out],
+            'openai' => [(float) $this->openai_price_in, (float) $this->openai_price_out],
+            'anthropic' => [(float) $this->anthropic_price_in, (float) $this->anthropic_price_out],
+            default => [0.0, 0.0],
         };
     }
 }

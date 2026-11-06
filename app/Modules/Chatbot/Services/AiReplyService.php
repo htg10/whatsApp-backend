@@ -28,6 +28,9 @@ class AiReplyService
 
     private ?AiSetting $settings = null;
     private bool $settingsLoaded = false;
+    // Context for usage logging, set per public call.
+    private ?int $usageTenantId = null;
+    private string $usageKind = 'reply';
 
     public function generate(Chatbot $chatbot, Conversation $conversation, string $incoming): ?string
     {
@@ -36,6 +39,9 @@ class AiReplyService
             Log::warning('AI reply skipped: no API key configured (set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env, then php artisan config:clear)');
             return null; // no AI key configured — skip AI, let caller use fallback
         }
+
+        $this->usageTenantId = $conversation->tenant_id;
+        $this->usageKind = 'reply';
 
         $system = $this->systemPrompt($chatbot);
         $messages = $this->history($conversation, $incoming);
@@ -66,6 +72,8 @@ class AiReplyService
      */
     public function classify(string $system, array $messages): ?string
     {
+        $this->usageKind = 'classify';
+
         foreach ($this->providerChain() as $provider) {
             try {
                 $reply = $this->callText($provider, $system, $messages);
@@ -96,6 +104,9 @@ class AiReplyService
         if (! str_starts_with($mime, 'image/') && $mime !== 'application/pdf') {
             return null;
         }
+
+        $this->usageTenantId = $chatbot->tenant_id;
+        $this->usageKind = 'vision';
 
         $system = $this->systemPrompt($chatbot) . "\n\n"
             . "The customer has sent a file (an image or a PDF). Look at it carefully and respond helpfully, "
@@ -230,6 +241,27 @@ class AiReplyService
         };
     }
 
+    /** Record one call's token usage for the admin cost dashboard (best-effort). */
+    private function recordUsage(string $provider, string $model, int $in, int $out): void
+    {
+        if ($in === 0 && $out === 0) {
+            return;
+        }
+
+        try {
+            \App\Models\AiUsageLog::create([
+                'tenant_id' => $this->usageTenantId,
+                'provider' => $provider,
+                'model' => $model,
+                'kind' => $this->usageKind,
+                'input_tokens' => $in,
+                'output_tokens' => $out,
+            ]);
+        } catch (\Throwable) {
+            // Never let usage logging affect the reply.
+        }
+    }
+
     /** @param array<int, array{role:string, content:string}> $messages */
     private function callGemini(string $system, array $messages): ?string
     {
@@ -255,6 +287,7 @@ class AiReplyService
             return null;
         }
 
+        $this->recordUsage('gemini', $model, (int) $res->json('usageMetadata.promptTokenCount', 0), (int) $res->json('usageMetadata.candidatesTokenCount', 0));
         $text = $res->json('candidates.0.content.parts.0.text');
 
         return $text ? trim($text) : null;
@@ -283,6 +316,7 @@ class AiReplyService
             return null;
         }
 
+        $this->recordUsage('gemini', $model, (int) $res->json('usageMetadata.promptTokenCount', 0), (int) $res->json('usageMetadata.candidatesTokenCount', 0));
         $text = $res->json('candidates.0.content.parts.0.text');
 
         return $text ? trim($text) : null;
@@ -313,6 +347,8 @@ class AiReplyService
             return null;
         }
 
+        $this->recordUsage('anthropic', $this->modelFor('anthropic'), (int) $res->json('usage.input_tokens', 0), (int) $res->json('usage.output_tokens', 0));
+
         foreach ($res->json('content', []) as $block) {
             if (($block['type'] ?? '') === 'text' && ! empty(trim($block['text'] ?? ''))) {
                 return trim($block['text']);
@@ -342,6 +378,8 @@ class AiReplyService
             return null;
         }
 
+        $this->recordUsage('anthropic', $this->modelFor('anthropic'), (int) $res->json('usage.input_tokens', 0), (int) $res->json('usage.output_tokens', 0));
+
         // Return the first text block (thinking blocks, if any, are skipped).
         foreach ($res->json('content', []) as $block) {
             if (($block['type'] ?? '') === 'text' && ! empty(trim($block['text'] ?? ''))) {
@@ -368,6 +406,7 @@ class AiReplyService
             return null;
         }
 
+        $this->recordUsage('openai', $this->modelFor('openai'), (int) $res->json('usage.prompt_tokens', 0), (int) $res->json('usage.completion_tokens', 0));
         $text = $res->json('choices.0.message.content');
 
         return $text ? trim($text) : null;
@@ -400,6 +439,7 @@ class AiReplyService
             return null;
         }
 
+        $this->recordUsage('openai', $this->modelFor('openai'), (int) $res->json('usage.prompt_tokens', 0), (int) $res->json('usage.completion_tokens', 0));
         $text = $res->json('choices.0.message.content');
 
         return $text ? trim($text) : null;
