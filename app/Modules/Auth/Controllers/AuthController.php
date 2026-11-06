@@ -126,20 +126,11 @@ class AuthController extends Controller
     {
         $user = $request->user();
 
-        if ($user->is_super_admin) {
-            $request->validate([
-                'password' => ['required', 'confirmed', Password::min(8)],
-            ]);
-        } else {
-            $request->validate([
-                'current_password' => ['required', 'string'],
-                'password' => ['required', 'confirmed', Password::min(8)],
-            ]);
-
-            if (! Hash::check($request->input('current_password'), $user->password)) {
-                return $this->fail('Current password is incorrect.', [], 422);
-            }
-        }
+        // A logged-in user can set a new password with just the new + confirm
+        // fields — the current password is no longer required (product choice).
+        $request->validate([
+            'password' => ['required', 'confirmed', Password::min(8)],
+        ]);
 
         $user->update(['password' => $request->input('password')]);
 
